@@ -39,7 +39,7 @@ The scanner looks for HTML tables or ARIA grids with a date column and an amount
 Everything runs in your browser and talks only to the Wallet API with your own token. No analytics, no developer server. See [PRIVACY.md](PRIVACY.md).
 
 ## Publishing to the Chrome Web Store
-Listing text, permission justifications and data-usage answers are in [store/LISTING.md](store/LISTING.md), with 1280×800 screenshots and a small promo tile alongside. Zip the extension files (not `store/`, `.git` or docs) for upload:
+Listing text, permission justifications and data-usage answers are in [store/LISTING.md](store/LISTING.md), with 1280×800 screenshots and a small promo tile alongside. A ready-to-upload build is in [dist/bank-to-wallet-sync-0.1.0.zip](dist/bank-to-wallet-sync-0.1.0.zip). To rebuild it, zip these files (not `store/`, `.git` or docs) with `manifest.json` at the zip root:
 
 ```
 manifest.json background.js popup.html popup.js options.html options.js scanner.js wallet.js demo.js style.css icons/
