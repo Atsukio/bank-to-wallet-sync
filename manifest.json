@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Bank to Wallet Sync",
+  "version": "0.1.0",
+  "description": "Reads transactions from the bank page you're viewing and adds them to BudgetBakers Wallet. Currently supports Maybank2u (M2U).",
+  "permissions": ["storage", "activeTab", "scripting", "sidePanel"],
+  "host_permissions": [
+    "https://*.maybank2u.com.my/*",
+    "https://rest.budgetbakers.com/*"
+  ],
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": {
+    "default_title": "Bank to Wallet Sync",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+  },
+  "side_panel": { "default_path": "popup.html" },
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html"
+}

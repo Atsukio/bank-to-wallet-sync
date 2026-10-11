@@ -1,0 +1,49 @@
+# Bank to Wallet Sync
+
+A Chrome/Edge extension. You log in to your bank yourself as usual; the extension only reads the transaction table already on screen and adds new rows to BudgetBakers Wallet via the official REST API.
+
+**Supported banks:** Maybank2u (M2U) for now. The page reader is in `scanner.js`, and the popup only runs on `maybank2u.com.my` pages (see `host_permissions` in `manifest.json` and the URL check in `popup.js`) — more banks would need an entry in both.
+
+![Reviewing transactions before syncing](store/screenshot-1-review.png)
+
+## Install
+1. Open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**.
+2. Click **Load unpacked** and pick this folder.
+3. Open the extension's **Settings**, paste your Wallet API token (Wallet web app → Settings → REST API, Premium only), click **Load accounts**, pick the account that mirrors your Maybank account, save.
+
+## Use
+1. Log in to Maybank2u and open the account's transaction history.
+2. Click the extension icon → **Read transactions on this page**.
+3. Untick anything you don't want, then **Add to Wallet**.
+
+## How duplicates are avoided
+Nothing is written into Wallet to track what was synced. Before showing the list, the extension fetches the account's existing records for the date range and compares each transaction by date, amount and description (ignoring case, spacing and punctuation, and allowing for Wallet cutting descriptions short). Matches are paired one-to-one, so two identical coffees on the same day need two Wallet records.
+
+- **In Wallet:** same date, amount and description.
+- **Likely in Wallet:** same date and amount, different description. It's left unticked and shows the Wallet description. **Replace** sets that Wallet record's note to the bank's description. The payer, category and labels are never touched, and new records are created without a payer too (the description goes in the note).
+
+Records synced by older versions carry a `[m2u:…]` tag in their note. It's ignored when reading and not written any more, so you can delete it from those notes if you like.
+
+## Before your first real sync
+- Click **Preview payload** and compare the fields with the `POST /v1/api/records` schema in the API explorer: https://rest.budgetbakers.com/wallet/openapi/ui. Adjust `toWalletRecord()` in `wallet.js` if names differ.
+- Try it with one transaction first.
+
+## If it says "No transaction table found"
+The scanner looks for HTML tables or ARIA grids with a date column and an amount (or debit/credit) column. If Maybank2u lays the history out differently, `scanPage()` in `scanner.js` needs adjusting to the real page structure.
+
+## Limits
+- Wallet allows 300 API requests/hour; one read + sync uses a handful.
+- Records are created without a category (Wallet shows them as Unknown) unless your Wallet rules recategorise them.
+
+## Privacy
+Everything runs in your browser and talks only to the Wallet API with your own token. No analytics, no developer server. See [PRIVACY.md](PRIVACY.md).
+
+## Publishing to the Chrome Web Store
+Listing text, permission justifications and data-usage answers are in [store/LISTING.md](store/LISTING.md), with 1280×800 screenshots and a small promo tile alongside. Zip the extension files (not `store/`, `.git` or docs) for upload:
+
+```
+manifest.json background.js popup.html popup.js options.html options.js scanner.js wallet.js demo.js style.css icons/
+```
+
+## License
+[MIT](LICENSE). Not affiliated with or endorsed by Malayan Banking Berhad or BudgetBakers.
