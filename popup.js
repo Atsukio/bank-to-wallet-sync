@@ -1,6 +1,6 @@
 import { scanPage, diagnosePage } from './scanner.js';
-import { getSettings, existingRecords, toWalletRecord, recordText, createRecords, updateRecords } from './wallet.js';
-import { DEMO_TXS, demoRecords } from './demo.js';
+import { getSettings, existingRecords, listRules, matchRule, toWalletRecord, recordText, createRecords, updateRecords } from './wallet.js';
+import { DEMO_TXS, DEMO_RULES, demoRecords } from './demo.js';
 
 const $ = (id) => document.getElementById(id);
 let settings, txs = [], demo = false, walletRecords = [];
@@ -83,11 +83,18 @@ async function analyse(raw) {
     showCoverage(dates, records);
   } catch (e) { return setStatus(e.message, 'error'); }
 
+  // Categories are a convenience: if the rules can't be loaded, records are still added without one.
+  let ruleNote = '';
+  try {
+    const rules = demo ? DEMO_RULES : await listRules(settings.token);
+    txs.filter((t) => !t.done && !t.likely).forEach((t) => { t.rule = matchRule(t.desc, rules, settings.accountId); });
+  } catch (e) { ruleNote = ` Couldn't load Wallet rules, so no categories will be set (${e.message})`; }
+
   const fresh = txs.filter((t) => !t.done && !t.likely).length;
   const likely = txs.filter((t) => t.likely).length;
   const parts = [fresh ? `${fresh} new of ${txs.length} found.` : `No new transactions among the ${txs.length} found.`];
   if (likely) parts.push(`${likely} look like they're already in Wallet (unticked).`);
-  setStatus((demo ? 'DEMO DATA, nothing will be sent to Wallet. ' : '') + parts.join(' '));
+  setStatus((demo ? 'DEMO DATA, nothing will be sent to Wallet. ' : '') + parts.join(' ') + ruleNote, ruleNote ? 'warn' : '');
   render();
 }
 
@@ -138,6 +145,13 @@ function render() {
       btn.onclick = () => replace([t]);
       note.append(text, btn);
       li.append(note);
+    }
+    if (t.rule && !t.done && !t.likely) {
+      const cat = document.createElement('span');
+      cat.className = 'match muted';
+      const labels = (t.rule.labels || []).map((l) => l.name).filter(Boolean);
+      cat.textContent = `Category: ${t.rule.category.name || 'from your Wallet rule'}${labels.length ? ` · ${labels.join(', ')}` : ''}`;
+      li.append(cat);
     }
     li.querySelector('input').onchange = (e) => { t.selected = e.target.checked; updateCount(); };
     return li;

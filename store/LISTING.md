@@ -23,6 +23,7 @@ FEATURES
 • Reads the transaction table on the Maybank2u page you are viewing. No bank login is ever handled by the extension.
 • Duplicate detection: compares date, amount and description against your existing Wallet records, so re-running it never double-adds.
 • "Likely in Wallet" matches (same date and amount, different description) are left unticked, with a one-click option to replace the Wallet note with the bank's description.
+• Categories and labels are filled in from your own Wallet rules (Wallet does not apply them to API-created records).
 • Review before anything is written: untick rows, preview the payload, then Add to Wallet.
 • Built-in demo data to try it with no bank login and no Wallet token.
 • Side panel that only appears on Maybank2u tabs.

@@ -1,23 +1,49 @@
+/* Material Design 3 colour roles, from a teal seed (light and dark schemes). */
 :root {
-  --paper: #f3f6f5; --ink: #14302c; --muted: #5d716d; --line: #d5dedb;
-  --teal: #0e6f66; --teal-ink: #ffffff; --debit: #a8321e; --credit: #1f7a3e; --warn: #8a5a00;
-  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --md-primary: #006a60; --md-on-primary: #ffffff;
+  --md-primary-container: #9ef2e3; --md-on-primary-container: #00201c;
+  --md-surface: #f4fbf8; --md-on-surface: #161d1c; --md-on-surface-variant: #3f4947;
+  --md-surface-container: #e9efec; --md-surface-container-high: #e3eae7;
+  --md-outline: #6f7977; --md-outline-variant: #bec9c6;
+  --md-error: #ba1a1a;
+  /* M3 has no income/warning roles; these are custom colours tuned to the same tones. */
+  --credit: #1b6b3a; --warn: #7a5900;
+  font: 13px/1.5 Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
-  :root { --paper: #12201e; --ink: #e3ece9; --muted: #93a8a3; --line: #2b3d3a;
-    --teal: #3fb3a6; --teal-ink: #0b1a18; --debit: #f08a76; --credit: #6fd08f; --warn: #e3b55a; }
+  :root {
+    --md-primary: #82d5c7; --md-on-primary: #003731;
+    --md-primary-container: #005048; --md-on-primary-container: #9ef2e3;
+    --md-surface: #0e1514; --md-on-surface: #dde4e1; --md-on-surface-variant: #bec9c6;
+    --md-surface-container: #1a2120; --md-surface-container-high: #252b2a;
+    --md-outline: #899390; --md-outline-variant: #3f4947;
+    --md-error: #ffb4ab;
+    --credit: #8bd99f; --warn: #e9c16c;
+  }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); }
+body { margin: 0; background: var(--md-surface); color: var(--md-on-surface); }
 button, select, input { font: inherit; color: inherit; }
-select, option { background-color: var(--paper); color: var(--ink); }
-button { border: 1px solid var(--line); background: transparent; padding: 7px 12px; border-radius: 6px; cursor: pointer; }
-button.primary { background: var(--teal); color: var(--teal-ink); border-color: var(--teal); font-weight: 600; }
-button:disabled { opacity: .45; cursor: default; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-a { color: var(--teal); }
-.muted { color: var(--muted); }
+select, option { background-color: var(--md-surface); color: var(--md-on-surface); }
+input[type=checkbox] { accent-color: var(--md-primary); }
+
+/* Outlined button; .primary is the filled button. Both are fully rounded, as in M3. */
+button {
+  position: relative; border: 1px solid var(--md-outline); background: transparent; color: var(--md-primary);
+  padding: 8px 16px; border-radius: 20px; cursor: pointer; font-weight: 500; letter-spacing: .01em;
+}
+button:hover:not(:disabled) { background: color-mix(in srgb, var(--md-primary) 8%, transparent); }
+button:active:not(:disabled) { background: color-mix(in srgb, var(--md-primary) 12%, transparent); }
+button.primary { background: var(--md-primary); color: var(--md-on-primary); border-color: transparent; }
+button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--md-on-primary) 8%, var(--md-primary)); }
+button.primary:active:not(:disabled) { background: color-mix(in srgb, var(--md-on-primary) 12%, var(--md-primary)); }
+button:disabled { opacity: .38; cursor: default; }
+button.primary:disabled { background: color-mix(in srgb, var(--md-on-surface) 12%, transparent); color: var(--md-on-surface); opacity: .38; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
+
+a { color: var(--md-primary); }
+.muted { color: var(--md-on-surface-variant); }
 .status { min-height: 1.4em; margin: 8px 0; }
-.status.error { color: var(--debit); }
+.status.error { color: var(--md-error); }
 .status.warn { color: var(--warn); }

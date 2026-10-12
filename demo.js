@@ -26,6 +26,14 @@ const DEMO_OTHER = [
   { date: '2026-10-08', amount: 12, type: 'expense', desc: 'Teh tarik' },
 ];
 
+// Fake Wallet categorisation rules, shaped like GET /record-rules.
+export const DEMO_RULES = [
+  { keywords: ['grab', 'petronas'], category: { id: 'demo-transport', name: 'Transportation' } },
+  { keywords: ['tesco', 'starbucks', 'mcdonalds'], category: { id: 'demo-food', name: 'Food & Drinks' } },
+  { keywords: ['tenaga'], category: { id: 'demo-bills', name: 'Bills & Utilities' }, labels: [{ id: 'demo-home', name: 'Home' }] },
+  { keywords: ['salary'], category: { id: 'demo-income', name: 'Income' } },
+];
+
 // Mirrors what existingRecords() returns from the real API.
 export function demoRecords(txs) {
   const recs = [];

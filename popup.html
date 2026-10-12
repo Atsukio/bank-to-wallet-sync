@@ -7,20 +7,20 @@
   .account { font-size: 12px; }
   .actions { display: flex; gap: 8px; margin-top: 12px; }
   .actions .grow { flex: 1; }
-  ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-  li { display: grid; grid-template-columns: 18px 74px 1fr auto; gap: 8px; align-items: center; padding: 7px 2px; border-bottom: 1px solid var(--line); }
+  ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--md-outline-variant); }
+  li { display: grid; grid-template-columns: 18px 74px 1fr auto; gap: 8px; align-items: center; padding: 7px 2px; border-bottom: 1px solid var(--md-outline-variant); }
   li.done { opacity: .5; }
   li.likely .desc, li.likely .muted { opacity: .7; }
   .match { grid-column: 2 / -1; font-size: 12px; margin-top: -4px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .match span { overflow-wrap: anywhere; }
-  .match button { padding: 2px 8px; font-size: 11px; flex: none; }
+  .match button { padding: 2px 12px; font-size: 11px; flex: none; }
   #coverage { margin: 0 0 8px; font-size: 12px; }
   .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .amt { font-variant-numeric: tabular-nums; text-align: right; }
-  .amt.neg { color: var(--debit); } .amt.pos { color: var(--credit); }
-  .tag { font-size: 11px; color: var(--muted); }
+  .amt.neg { color: var(--md-error); } .amt.pos { color: var(--credit); }
+  .tag { font-size: 11px; color: var(--md-on-surface-variant); }
   .bar { display: flex; justify-content: space-between; align-items: center; margin: 10px 0 6px; }
-  pre { max-height: 220px; overflow: auto; font-size: 11px; background: color-mix(in srgb, var(--line) 35%, transparent); padding: 8px; border-radius: 6px; }
+  pre { max-height: 220px; overflow: auto; font-size: 11px; background: var(--md-surface-container-high); padding: 12px; border-radius: 12px; }
   [hidden] { display: none !important; }
 </style></head>
 <body>

@@ -23,7 +23,7 @@ $('load').onclick = async () => {
   setStatus('Loading accounts…');
   try {
     const accounts = await listAccounts(token);
-    if (!accounts.length) return setStatus('No accounts returned for this token.', 'warn');
+    if (!accounts.length) return setStatus('No active (non-archived) accounts returned for this token.', 'warn');
     fillAccounts(accounts, (await getSettings()).accountId);
     setStatus(`Loaded ${accounts.length} accounts.`);
   } catch (e) { setStatus(e.message, 'error'); }

@@ -19,9 +19,34 @@ async function call(token, path, opts = {}) {
   return body;
 }
 
+// Archived accounts are left out: they're hidden in Wallet and shouldn't receive new records.
 export async function listAccounts(token) {
   const data = await call(token, '/accounts?limit=200');
-  return data.accounts || data.items || (Array.isArray(data) ? data : []);
+  return (data.accounts || data.items || (Array.isArray(data) ? data : [])).filter((a) => !a.archived);
+}
+
+// The user's Wallet categorisation rules (keywords -> category and labels). Wallet applies these to bank-sync and
+// GPay imports but not to records created through the API, so we apply them ourselves.
+export async function listRules(token) {
+  const data = await call(token, '/record-rules?limit=200');
+  return data.recordRules || data.rules || data.items || (Array.isArray(data) ? data : []);
+}
+
+// Returns the best matching rule for a bank description, or null. A keyword matches if it appears in the description
+// ignoring case; the rule with the longest matching keyword wins, so "STARBUCKS MID VALLEY" beats "STAR".
+// Transfer rules (with a target account) are skipped, as are rules limited to a different account.
+export function matchRule(desc, rules, accountId) {
+  const text = (desc || '').toLowerCase();
+  let best = null, bestLen = 0;
+  for (const rule of rules) {
+    if (!rule.category?.id || rule.toAccountId) continue;
+    if (rule.fromAccountId && rule.fromAccountId !== accountId) continue;
+    for (const kw of rule.keywords || []) {
+      const k = String(kw).trim().toLowerCase();
+      if (k && k.length > bestLen && text.includes(k)) { best = rule; bestLen = k.length; }
+    }
+  }
+  return best;
 }
 
 const MY_OFFSET_MS = 8 * 3600e3;
@@ -69,11 +94,15 @@ export function recordText(tx) {
 // Body of POST /records (see https://rest.budgetbakers.com/wallet/openapi). The amount's sign decides
 // income vs expense, so there is no separate type field.
 export function toWalletRecord(tx, accountId, currency) {
+  const rule = tx.rule;
+  const labelIds = (rule?.labels || []).filter((l) => l.id && !l.archived).map((l) => l.id);
   return {
     accountId,
     recordDate: new Date(`${tx.date}T12:00:00+08:00`).toISOString(),
     amount: { value: tx.amount, currencyCode: currency },
     ...recordText(tx),
+    ...(rule?.category?.id && { categoryId: rule.category.id }),
+    ...(labelIds.length && { labelIds }),
   };
 }
 
