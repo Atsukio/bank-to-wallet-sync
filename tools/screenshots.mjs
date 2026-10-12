@@ -84,5 +84,17 @@ fs.writeFileSync(path.join(out, 'promo-small-440x280.png'), await compose({
 }));
 console.log('wrote store/promo-small-440x280.png');
 
+// Marquee promo tile (1400x560, optional): the title and tagline beside the top of the panel
+const marqueePanel = await sharp(panel.shot).extract({ left: 0, top: 0, width: 420 * DPR, height: 1060 }).toBuffer();
+fs.writeFileSync(path.join(out, 'marquee-1400x560.png'), await compose({
+  width: 1400, height: 560,
+  html: `<div style="padding:0 80px;flex:1"><img src="${icon}" width="64" style="margin-bottom:16px">
+      <h1 style="font:500 60px/66px Roboto;margin:0 0 16px;color:#fff">Bank to Wallet Sync</h1>
+      <p style="font:400 26px/36px Roboto;margin:0;opacity:.92">Your bank transactions into Wallet. Reviewed, categorised, no duplicates.</p></div>
+    <div style="margin-right:90px;border-radius:14px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.35);background:#fff;flex:none">
+      <img src="${b64(marqueePanel)}" style="display:block;width:360px"></div>`,
+}));
+console.log('wrote store/marquee-1400x560.png');
+
 await browser.close();
 server.close();

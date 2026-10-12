@@ -69,7 +69,8 @@ No. All code, including the font, is bundled in the package.
 
 ## Assets in this folder
 - `screenshot-1-review.png`, `screenshot-2-duplicates.png`, `screenshot-3-settings.png`: 1280×800 (upload 1–5)
-- `promo-small-440x280.png`: small promo tile
+- `promo-small-440x280.png`: small promo tile (440×280)
+- `marquee-1400x560.png`: marquee promo tile (1400×560, optional, used if the store features the extension)
 - Store icon: `icons/icon-128.png`
 - Regenerate all of them with `npm run screenshots`.
 
