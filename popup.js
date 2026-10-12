@@ -1,110 +1,353 @@
-import { scanPage, diagnosePage } from './scanner.js';
-import { getSettings, existingRecords, listRules, matchRule, toWalletRecord, recordText, createRecords, updateRecords } from './wallet.js';
-import { DEMO_TXS, DEMO_RULES, demoRecords } from './demo.js';
+import { scanPage, diagnosePage, watchPage, detectAccount } from './scanner.js';
+import {
+  getSettings, listAccounts, balanceOf, listCategories, existingRecords, listRules, matchRule, categoryHistory, guessCategory,
+  memoryKey, toWalletRecord, recordText, createRecords, updateRecords, deleteRecords,
+} from './wallet.js';
+import { signature, matchRecords, carryOver, matchTransferRule } from './matching.js';
+import { isSupportedUrl } from './sites.js';
+import {
+  DEMO_TXS, DEMO_RULES, DEMO_HISTORY, DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSFER_RULES, demoRecords,
+} from './demo.js';
 
 const $ = (id) => document.getElementById(id);
-let settings, txs = [], demo = false, walletRecords = [];
+const UNDO_WINDOW_MS = 15 * 60e3;
+const MAX_IGNORED = 2000, MAX_REMEMBERED = 500;
+
+let settings;
+let txs = [], walletRecords = [], collectedRaw = [];
+let demo = false, busy = false;
+let demoIgnored = []; // in demo mode "Ignore" is remembered for the session only, never saved
+let accounts = [], categories = [];
+let bank = null;          // { label, digits } the page seems to be showing (see detectAccount)
+let accountId = '';       // the Wallet account in use for this page
+let activeTabId = null;
+let lastAdd = null;       // { groups, at, demo? }
+let lastSig = '', lastRead = 0, readTimer;
 
 function setStatus(msg, kind = '') { $('status').textContent = msg; $('status').className = `status ${kind}`; }
 const fmt = (n) => (n < 0 ? '-' : '+') + 'RM ' + Math.abs(n).toLocaleString('en-MY', { minimumFractionDigits: 2 });
+const save = (items) => chrome.storage.local.set(items);
+const nameOf = (id) => accounts.find((a) => a.id === id)?.name || 'another account';
+const currencyOf = (id) => accounts.find((a) => a.id === id)?.currencyCode || settings.currency || 'MYR';
+const isFresh = (t) => !t.done && !t.likely && !t.ignored;
+const ready = () => Boolean(settings?.token);
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 $('openSettings').onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
 
-async function init() {
-  settings = await getSettings();
-  if (settings.accountName) $('account').textContent = settings.accountName;
-  if (!settings.token || !settings.accountId) {
-    setStatus('Add your Wallet API token and pick an account in Settings first.', 'warn');
-    $('read').disabled = true;
-  }
+// ---------------------------------------------------------------------------------------------------------------
+// Accounts: which Wallet account this page's transactions belong to.
+
+// A stable key for the bank account on screen: its last four digits if the page shows a number, else its name.
+const bankKey = (b) => (!b ? '' : b.digits ? `d:${b.digits}` : b.label ? `l:${b.label.toLowerCase().replace(/[^a-z0-9]/g, '')}` : '');
+
+// The Wallet account to use: the one mapped to this bank account, else the default from Settings. '' if neither is a
+// real, active account, in which case the panel asks the user to choose rather than guessing.
+function resolveAccount() {
+  if (demo) return accountId && accounts.some((a) => a.id === accountId) ? accountId : DEMO_ACCOUNTS[0].id;
+  const valid = (id) => id && (!accounts.length || accounts.some((a) => a.id === id));
+  const mapped = settings.accountMap[bankKey(bank)];
+  return valid(mapped) ? mapped : valid(settings.accountId) ? settings.accountId : '';
 }
 
-$('read').onclick = async () => {
-  $('results').hidden = true; $('payload').hidden = true;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!/^https:\/\/[^/]*maybank2u\.com\.my\//.test(tab?.url || '')) {
-    return setStatus('Open your Maybank2u transaction history, then try again.', 'error');
+let accountsCache = { at: 0, promise: null };
+function loadAccounts(fresh = false) {
+  if (demo) return Promise.resolve(DEMO_ACCOUNTS);
+  if (fresh || !accountsCache.promise || Date.now() - accountsCache.at > 10 * 60e3) {
+    accountsCache = { at: Date.now(), promise: listAccounts(settings.token) };
+    accountsCache.promise.catch(() => { accountsCache.promise = null; });
   }
-  setStatus('Reading page…');
-  let frames;
-  try {
-    frames = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: scanPage });
-  } catch (e) { return setStatus(`Couldn't read the page: ${e.message}`, 'error'); }
+  return accountsCache.promise;
+}
 
-  const raw = frames.flatMap((f) => f.result || []);
+async function refreshAccounts(fresh = false) {
+  try {
+    accounts = await loadAccounts(fresh);
+    if (!demo) {
+      const list = accounts.map((a) => ({ id: a.id, name: a.name }));
+      if (JSON.stringify(list) !== JSON.stringify(settings.accountList)) { settings.accountList = list; save({ accountList: list }); }
+    }
+  } catch { /* keep what we had: the balance and picker are conveniences */ }
+  accountId = resolveAccount();
+  renderAccount();
+}
+
+function renderAccount() {
+  $('demo').textContent = demo ? 'Exit demo' : 'Demo data';
+  $('demo').title = demo ? 'Leave the demo and go back to your real accounts' : 'Dummy transactions, no login or Wallet token needed';
+  $('demoBar').hidden = !demo;
+  const select = $('accountSelect');
+  const configured = ready() || demo;
+  select.hidden = !configured || !accounts.length;
+  $('account').hidden = !select.hidden;
+  if (!select.hidden) {
+    const options = accounts.map((a) => new Option(a.name || a.id, a.id));
+    if (!accountId) options.unshift(new Option('Choose a Wallet account…', ''));
+    select.replaceChildren(...options);
+    select.value = accountId;
+  } else if (settings?.accountName) $('account').textContent = settings.accountName;
+  $('bank').hidden = !bank?.label;
+  if (bank?.label) $('bank').textContent = `Reading: ${bank.label}${bank.digits ? ` ••${bank.digits}` : ''}`;
+  showBalance(balanceOf(accounts.find((a) => a.id === accountId)), demo ? ' (demo)' : '');
+  updateCount();
+}
+
+function showBalance(b, note = '') {
+  $('balance').hidden = !b;
+  if (!b) return;
+  const amount = b.value.toLocaleString('en-MY', { style: 'currency', currency: b.currency || settings.currency || 'MYR' });
+  $('balance').textContent = `Wallet balance: ${amount}${note}`;
+}
+
+$('accountSelect').onchange = async (e) => {
+  const id = e.target.value;
+  if (!id) return;
+  const key = bankKey(bank);
+  if (demo) accountId = id;
+  else if (key) { settings.accountMap = { ...settings.accountMap, [key]: id }; await save({ accountMap: settings.accountMap }); }
+  else { settings.accountId = id; settings.accountName = nameOf(id); await save({ accountId: id, accountName: settings.accountName }); }
+  accountId = id;
+  renderAccount();
+  reanalyse();
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// Reading the page.
+
+async function init() {
+  settings = await getSettings();
+  lastAdd = settings.lastAdd;
+  $('clear').hidden = !settings.collectPages;
+  showUndo();
+  if (!settings.token) {
+    setStatus('Add your Wallet API token in Settings first (the cog above).', 'warn');
+    $('read').disabled = true;
+    renderAccount();
+    return;
+  }
+  await refreshAccounts();
+  readPage({ auto: true });
+}
+
+// Reads the active supported-bank tab.
+//   auto:  the read was triggered automatically (panel opened, page changed): gated by the auto-read setting, quiet
+//          when there is nothing to show, and it leaves the list alone if the transactions haven't changed.
+//   quiet: refresh in place without blanking the list first (used after changing account, ignoring a row, undoing).
+//   force: re-check Wallet even if the bank's transactions are unchanged (records may have been added or deleted there).
+async function readPage({ auto = false, quiet = false, force = false } = {}) {
+  if (busy || (auto && (demo || !ready() || !settings.autoRead))) return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  activeTabId = tab?.id ?? null;
+  if (!isSupportedUrl(tab?.url)) {
+    if (!auto && !quiet) setStatus('Open your bank\'s transaction history, then try again.', 'error');
+    return;
+  }
+  const soft = auto || quiet;
+  if (!soft) { $('results').hidden = true; $('payload').hidden = true; setStatus('Reading page…'); }
+  const target = { tabId: tab.id, allFrames: true };
+  let frames, accountFrames = [];
+  try {
+    // The watcher survives only until the page navigates, so it is (re)installed on every read.
+    if (settings.autoRead) chrome.scripting.executeScript({ target, func: watchPage }).catch(() => {});
+    [frames, accountFrames] = await Promise.all([
+      chrome.scripting.executeScript({ target, func: scanPage }),
+      chrome.scripting.executeScript({ target, func: detectAccount }).catch(() => []),
+    ]);
+  } catch (e) { return soft ? undefined : setStatus(`Couldn't read the page: ${e.message}`, 'error'); }
+
+  bank = accountFrames.map((f) => f.result).find(Boolean) || null;
+  let raw = frames.flatMap((f) => f.result || []);
+  if (settings.collectPages && raw.length) {
+    // Keep rows from pages already visited (the current page's rows replace their earlier copies).
+    const seen = new Set(raw.map(signature));
+    raw = [...raw, ...collectedRaw.filter((t) => !seen.has(signature(t)))];
+    collectedRaw = raw;
+  }
+  const sig = JSON.stringify([accountId, bankKey(bank), raw.map((t) => [t.date, t.desc, t.amount])]);
+  if (soft && !force && sig === lastSig && !$('results').hidden) return;
+  lastRead = Date.now();
+  lastSig = sig;
+  if (soft && !raw.length) {
+    $('results').hidden = true; $('payload').hidden = true; txs = []; updateBadge();
+    return setStatus('No transactions on this page yet. They are read automatically when they appear.');
+  }
+  if (!soft) { $('results').hidden = true; $('payload').hidden = true; }
   if (!raw.length) {
     setStatus('No transactions recognised on this page. Open the account history view and try again. If they are visible, copy the page details below and send them over.', 'error');
     try {
-      const diag = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: diagnosePage });
+      const diag = await chrome.scripting.executeScript({ target, func: diagnosePage });
       $('payload').textContent = JSON.stringify(diag.map((f) => f.result), null, 2);
       $('payload').hidden = false; $('results').hidden = false; $('coverage').textContent = '';
       $('list').replaceChildren(); $('sync').disabled = true; $('count').textContent = 'Page details (no transaction values)';
     } catch (e) { /* the status message above still applies */ }
     return;
   }
-  demo = false;
-  analyse(raw);
+  if (demo) leaveDemo();
+  busy = true;
+  try {
+    await refreshAccounts();
+    await analyse(raw);
+  } finally { busy = false; }
+}
+
+$('read').onclick = async () => {
+  if (demo) await exitDemo({ read: false }); // pressing Read means "show me my real page"
+  readPage();
 };
 
-// Dummy transactions and a fake Wallet history: no Maybank login, token or network needed, and nothing is written.
-$('demo').onclick = () => {
+// Re-check the current rows (after an account change, ignoring/restoring a row, or an undo) without blanking the list.
+function reanalyse() {
+  if (demo) return analyse(DEMO_TXS);
+  return readPage({ quiet: true, force: true });
+}
+
+// Re-read automatically (debounced) when the page changes, the user navigates, or switches tab.
+const readSoon = (force = false) => { clearTimeout(readTimer); readTimer = setTimeout(() => readPage({ auto: true, force }), 100); };
+
+// Settings changed on the Settings page apply to the open panel straight away.
+chrome.storage.onChanged.addListener((changes) => {
+  if (!settings) return;
+  for (const [key, change] of Object.entries(changes)) if (key in settings) settings[key] = change.newValue;
+  if ('collectPages' in changes) { $('clear').hidden = !settings.collectPages; if (!settings.collectPages) collectedRaw = []; }
+  if ('token' in changes) { accountsCache = { at: 0, promise: null }; }
+  if ('autoRead' in changes && settings.autoRead) readSoon();
+});
+chrome.runtime.onMessage.addListener((msg) => { if (msg?.type === 'b2w-page-changed') readSoon(); });
+chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  if (!info.url && info.status !== 'complete') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id === tabId) readSoon();
+});
+// Coming back to the bank tab or window is when Wallet may have changed (e.g. a record was deleted), so check it again.
+chrome.tabs.onActivated.addListener(() => readSoon(true));
+window.addEventListener('focus', () => { showUndo(); if (Date.now() - lastRead > 5000) readSoon(true); });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Demo mode: dummy transactions and a fake Wallet, no login, token or network needed, and nothing is written.
+
+$('demo').onclick = () => (demo ? exitDemo() : enterDemo());
+$('exitDemo').onclick = () => exitDemo();
+
+function enterDemo() {
   $('results').hidden = true; $('payload').hidden = true;
   demo = true;
+  accounts = DEMO_ACCOUNTS; categories = DEMO_CATEGORIES; bank = null;
+  accountId = DEMO_ACCOUNTS[0].id;
+  renderAccount();
   analyse(DEMO_TXS);
-};
+}
+
+// Back to real use: the real accounts and balance return, the demo list goes, and the page is read again (if allowed).
+async function exitDemo({ read = true } = {}) {
+  leaveDemo();
+  txs = []; walletRecords = []; lastSig = ''; lastAdd = lastAdd?.demo ? null : lastAdd;
+  $('results').hidden = true; $('payload').hidden = true;
+  setStatus(ready() ? '' : 'Add your Wallet API token in Settings first (the cog above).', ready() ? '' : 'warn');
+  updateBadge();
+  if (ready()) await refreshAccounts(); else renderAccount();
+  showUndo();
+  if (read) readPage({ auto: true, force: true });
+}
+
+function leaveDemo() {
+  demo = false; demoIgnored = []; categories = []; accounts = []; accountId = '';
+  if (lastAdd?.demo) { lastAdd = null; showUndo(); }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Caches for things that rarely change, so a page change costs one request (the Wallet records), not five.
+
+function cached(load, ttl) {
+  let at = 0, promise = null;
+  return (fresh = false) => {
+    if (fresh || !promise || Date.now() - at > ttl) {
+      at = Date.now();
+      promise = load();
+      promise.catch(() => { promise = null; });
+    }
+    return promise;
+  };
+}
+const rulesOnce = cached(() => listRules(settings.token), 5 * 60e3);
+const historyOnce = cached(() => categoryHistory(settings.token), 10 * 60e3);
+const categoriesOnce = cached(() => listCategories(settings.token), 30 * 60e3);
+
+// A category the user chose by hand for this merchant before, as a rule-shaped object.
+function rememberedRule(t) {
+  const key = memoryKey(t.desc);
+  const cat = key && settings.categoryMemory[key];
+  return cat ? { category: cat, labels: [], remembered: true } : null;
+}
+
+function rememberCategory(t, cat) {
+  const key = memoryKey(t.desc);
+  if (!key || demo) return; // demo choices are not remembered
+  const memory = { ...settings.categoryMemory };
+  delete memory[key]; // re-insert so the newest choices are last
+  if (cat) memory[key] = cat;
+  for (const k of Object.keys(memory).slice(0, Math.max(0, Object.keys(memory).length - MAX_REMEMBERED))) delete memory[k];
+  settings.categoryMemory = memory;
+  save({ categoryMemory: memory });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Matching against Wallet.
 
 async function analyse(raw) {
-  txs = raw.map((tx) => ({ ...tx, done: false, selected: true }));
+  const prior = new Map(txs.map((t) => [t.sig, t]));
+  const ignored = new Set(demo ? demoIgnored : settings.ignored);
+  txs = raw.map((tx) => {
+    const sig = signature(tx);
+    return carryOver({ ...tx, sig, done: false, selected: !tx.unsure, ignored: ignored.has(sig) }, prior.get(sig));
+  });
+
+  if (!accountId) {
+    setStatus('Choose which Wallet account these transactions belong to (the picker above).', 'warn');
+    txs.forEach((t) => { t.selected = false; });
+    $('coverage').textContent = '';
+    return render();
+  }
+
+  // Everything below runs alongside the records request.
+  const rulesRequest = (demo ? Promise.resolve(DEMO_RULES) : rulesOnce()).catch((e) => e);
+  const historyRequest = (demo ? Promise.resolve(DEMO_HISTORY) : historyOnce()).catch(() => []);
+  const categoriesRequest = demo ? Promise.resolve(DEMO_CATEGORIES) : categoriesOnce().catch(() => []);
 
   setStatus('Checking what\'s already in Wallet…');
   try {
     const dates = txs.map((t) => t.date).sort();
-    const records = demo ? demoRecords(txs) : await existingRecords(settings.token, settings.accountId, dates[0], dates.at(-1));
-    // Wallet records are matched one-to-one, so two identical RM 5 coffees need two records. Same date, amount and
-    // description counts as already in Wallet. Same date and amount with a different description is only "likely".
-    const pool = [...records];
-    const claim = (t, test) => {
-      const type = t.amount < 0 ? 'expense' : 'income';
-      const base = (r) => r.date === t.date && Math.abs(r.amount - Math.abs(t.amount)) < 0.005 && test(r);
-      // Prefer a record of the same income/expense type, but don't let a differently labelled type hide a match.
-      let i = pool.findIndex((r) => base(r) && (!r.type || r.type === type));
-      if (i < 0) i = pool.findIndex(base);
-      return i >= 0 ? pool.splice(i, 1)[0] : null;
-    };
-    txs.filter((t) => !t.done).forEach((t) => {
-      const m = claim(t, (r) => (r.texts || [r.desc]).some((x) => sameDescription(x, t.desc)));
-      if (m) { t.match = m; t.done = true; t.selected = false; }
-    });
-    txs.filter((t) => !t.done).forEach((t) => {
-      const m = claim(t, () => true);
-      if (m) { t.match = m; t.likely = true; t.selected = false; }
-    });
+    const records = demo ? demoRecords(txs) : await existingRecords(settings.token, accountId, dates[0], dates.at(-1));
+    matchRecords(txs, records);
     walletRecords = records;
     showCoverage(dates, records);
   } catch (e) { return setStatus(e.message, 'error'); }
 
   // Categories are a convenience: if the rules can't be loaded, records are still added without one.
   let ruleNote = '';
-  try {
-    const rules = demo ? DEMO_RULES : await listRules(settings.token);
-    txs.filter((t) => !t.done && !t.likely).forEach((t) => { t.rule = matchRule(t.desc, rules, settings.accountId); });
-  } catch (e) { ruleNote = ` Couldn't load Wallet rules, so no categories will be set (${e.message})`; }
+  const rules = await rulesRequest;
+  const history = await historyRequest;
+  categories = await categoriesRequest;
+  if (rules instanceof Error) ruleNote = ` Couldn't load Wallet rules, so rule-based categories are off (${rules.message})`;
+  const transferRules = demo ? DEMO_TRANSFER_RULES : settings.transferRules;
+  for (const t of txs.filter(isFresh)) {
+    if (!t.transferTo) {
+      const rule = matchTransferRule(t.desc, transferRules, accountId);
+      if (rule && accounts.some((a) => a.id === rule.accountId)) { t.transferTo = rule.accountId; t.transferAuto = true; }
+    }
+    // Your own choice for this merchant wins, then a Wallet rule, then what similar past records were filed under.
+    if (!t.rule) t.rule = rememberedRule(t) || (rules instanceof Error ? null : matchRule(t.desc, rules, accountId)) || guessCategory(t, history);
+  }
+  txs.forEach((t) => { if (!isFresh(t)) t.selected = false; });
 
-  const fresh = txs.filter((t) => !t.done && !t.likely).length;
+  const fresh = txs.filter(isFresh).length;
   const likely = txs.filter((t) => t.likely).length;
+  const mismatched = txs.filter((t) => t.typeMismatch).length;
   const parts = [fresh ? `${fresh} new of ${txs.length} found.` : `No new transactions among the ${txs.length} found.`];
-  if (likely) parts.push(`${likely} look like they're already in Wallet (unticked).`);
-  setStatus((demo ? 'DEMO DATA, nothing will be sent to Wallet. ' : '') + parts.join(' ') + ruleNote, ruleNote ? 'warn' : '');
+  if (likely - mismatched) parts.push(`${likely - mismatched} look like they're already in Wallet (unticked).`);
+  if (mismatched) parts.push(`${mismatched} match a Wallet record of the opposite type, which needs fixing in Wallet.`);
+  const bad = ruleNote || mismatched;
+  setStatus((demo ? 'DEMO DATA, nothing will be sent to Wallet. ' : '') + parts.join(' ') + ruleNote, bad ? 'warn' : '');
   render();
-}
-
-// Ignores case, spacing and punctuation. Wallet sometimes cuts descriptions short, so a long enough prefix counts too.
-function sameDescription(a, b) {
-  const n = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const [x, y] = [n(a), n(b)];
-  if (!x || !y) return false;
-  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  return short === long || (short.length >= 8 && long.startsWith(short));
 }
 
 const shortDate = (d) => new Date(`${d}T12:00:00+08:00`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
@@ -120,51 +363,155 @@ function showCoverage(dates, records) {
   if (!records.length) msg = `Wallet has no records for ${range}.`;
   else if (empty.length) msg += ` Nothing yet on: ${empty.map(shortDate).join(', ')}.`;
   else msg += ' Every date has at least one record.';
+  // Wallet's API serves a synced copy, so a record deleted in the app can still show here until it catches up.
+  const { syncing, changedAt } = records.meta || {};
+  if (syncing) msg += ' Wallet is still syncing, so recent changes (such as deletions) may not show yet.';
+  else if (changedAt) msg += ` Wallet's data last changed ${new Date(changedAt).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`;
   $('coverage').textContent = msg;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The list.
+
+const chip = (kind, text) => `<span class="chip ${kind}">${text}</span>`;
+
+function button(text, onclick, { title, cls = '' } = {}) {
+  const b = document.createElement('button');
+  b.textContent = text;
+  b.className = cls;
+  if (title) b.title = title;
+  b.onclick = onclick;
+  return b;
+}
+
+// A secondary line under a row: text on the left, optional buttons on the right.
+function line(cls, text, ...buttons) {
+  const row = document.createElement('span');
+  row.className = cls;
+  const label = document.createElement('span');
+  label.textContent = text;
+  row.append(label, ...buttons);
+  return row;
+}
+
+function categorySelect(t) {
+  const select = document.createElement('select');
+  select.className = 'mini';
+  select.setAttribute('aria-label', 'Category');
+  select.append(new Option('Uncategorised', ''));
+  const groups = new Map();
+  for (const c of categories) {
+    if (!groups.has(c.group)) groups.set(c.group, Object.assign(document.createElement('optgroup'), { label: c.group || 'Other' }));
+    groups.get(c.group).append(new Option(c.name, c.id));
+  }
+  select.append(...groups.values());
+  select.value = t.rule?.category?.id || '';
+  select.onchange = () => {
+    const picked = categories.find((c) => c.id === select.value);
+    t.rule = { manual: true, category: picked ? { id: picked.id, name: picked.name } : null, labels: [] };
+    rememberCategory(t, t.rule.category);
+    render();
+  };
+  select.onblur = () => render();
+  return select;
+}
+
+function transferSelect(t) {
+  const select = document.createElement('select');
+  select.className = 'mini';
+  select.setAttribute('aria-label', 'Transfer to');
+  select.append(new Option('Transfer to…', ''), ...accounts.filter((a) => a.id !== accountId).map((a) => new Option(a.name, a.id)));
+  select.onchange = () => { if (select.value) { t.transferTo = select.value; t.transferAuto = false; } render(); };
+  select.onblur = () => render();
+  return select;
+}
+
+function rowFor(t) {
+  const fresh = isFresh(t);
+  const li = document.createElement('li');
+  li.className = [t.done && 'done', t.likely && 'likely', t.ignored && 'ignored'].filter(Boolean).join(' ');
+  const chips = [];
+  if (t.done) chips.push(chip('in', 'In Wallet'));
+  else if (t.likely) chips.push(t.typeMismatch ? chip('check', 'Type differs') : chip('likely', 'Likely in Wallet'));
+  else if (t.ignored) chips.push(chip('in', 'Ignored'));
+  if (fresh && t.transferTo) chips.push(chip('likely', 'Transfer'));
+  li.innerHTML = `<input type="checkbox" ${t.selected ? 'checked' : ''} ${t.done || t.ignored ? 'disabled' : ''} aria-label="Include">
+      <span class="desc"></span><span class="amt ${t.amount < 0 ? 'neg' : 'pos'}">${fmt(t.amount)}</span>
+      <span class="sub"><span class="date">${t.date}</span>${chips.join('')}</span>`;
+  li.querySelector('.desc').textContent = t.desc;
+  li.querySelector('.desc').title = t.desc;
+  li.querySelector('input').onchange = (e) => { t.selected = e.target.checked; updateCount(); };
+
+  if (t.likely && t.typeMismatch) {
+    li.append(line('match unsure', `Wallet has this as ${t.match?.type || 'the other type'}, but the bank shows ${t.amount < 0 ? 'an expense' : 'income'}. Fix or delete it in Wallet.`));
+  } else if (t.likely) {
+    li.append(line('match', `In Wallet as: ${t.match?.desc || '(no description found)'}`,
+      button('Replace', () => replace([t]), { title: "Set this Wallet record's note to the bank's description. Amount, payer, category and labels are kept." })));
+  }
+  if (t.ignored) li.append(line('match', "Ignored: this row won't be synced.", button('Restore', () => setIgnored(t, false))));
+  if (!fresh) return li;
+
+  if (t.unsure) {
+    li.append(line('match unsure', "Couldn't confirm if this is money in or out. Check it before adding.",
+      button('Flip sign', () => { t.amount = -t.amount; t.flipped = !t.flipped; t.unsure = false; render(); }, { title: 'Swap between money out and money in' })));
+  }
+  if (t.transferTo) {
+    li.append(line('match cat', `Transfer to ${nameOf(t.transferTo)}${t.transferAuto ? ' (from your transfer rule)' : ''}`,
+      button('Not a transfer', () => { t.transferTo = ''; t.transferAuto = false; render(); })));
+  } else {
+    const name = t.rule?.category?.name || (t.rule?.category ? 'from your Wallet rule' : 'none');
+    const how = t.rule?.manual ? ' (your choice)' : t.rule?.remembered ? ' (remembered)' : t.rule?.guessed ? ' (from similar past records)' : '';
+    const labels = (t.rule?.labels || []).map((l) => l.name).filter(Boolean);
+    const change = categories.length ? button('Change', () => { const s = categorySelect(t); change.replaceWith(s); s.focus(); }) : null;
+    li.append(line('match cat', `Category: ${name}${labels.length ? ` · ${labels.join(', ')}` : ''}${how}`, ...(change ? [change] : [])));
+  }
+  const acts = document.createElement('span');
+  acts.className = 'acts';
+  if (!t.transferTo && accounts.length > 1) {
+    const make = button('Make transfer', () => { const s = transferSelect(t); make.replaceWith(s); s.focus(); }, { cls: 'text', title: 'Create this as a transfer to another of your Wallet accounts' });
+    acts.append(make);
+  }
+  acts.append(button('Ignore', () => setIgnored(t, true), { cls: 'text', title: "Never sync this row (it's remembered on this computer)" }));
+  li.append(acts);
+  return li;
 }
 
 function render() {
   $('results').hidden = false;
-  $('list').replaceChildren(...txs.map((t, i) => {
-    const li = document.createElement('li');
-    if (t.done) li.className = 'done';
-    else if (t.likely) li.className = 'likely';
-    li.innerHTML = `<input type="checkbox" ${t.selected ? 'checked' : ''} ${t.done ? 'disabled' : ''} aria-label="Include">
-      <span class="muted">${t.date}</span><span class="desc"></span>
-      <span class="amt ${t.amount < 0 ? 'neg' : 'pos'}">${t.done ? '<span class="tag">In Wallet</span> ' : t.likely ? '<span class="tag">Likely in Wallet</span> ' : ''}${fmt(t.amount)}</span>`;
-    li.querySelector('.desc').textContent = t.desc;
-    li.querySelector('.desc').title = t.desc;
-    if (t.likely) {
-      const note = document.createElement('span');
-      note.className = 'match';
-      const text = document.createElement('span');
-      text.textContent = `In Wallet as: ${t.match?.desc || '(no description found)'}`;
-      const btn = document.createElement('button');
-      btn.textContent = 'Replace';
-      btn.title = "Set this Wallet record's note to the bank's description. Amount, payer, category and labels are kept.";
-      btn.onclick = () => replace([t]);
-      note.append(text, btn);
-      li.append(note);
-    }
-    if (t.rule && !t.done && !t.likely) {
-      const cat = document.createElement('span');
-      cat.className = 'match muted';
-      const labels = (t.rule.labels || []).map((l) => l.name).filter(Boolean);
-      cat.textContent = `Category: ${t.rule.category.name || 'from your Wallet rule'}${labels.length ? ` · ${labels.join(', ')}` : ''}`;
-      li.append(cat);
-    }
-    li.querySelector('input').onchange = (e) => { t.selected = e.target.checked; updateCount(); };
-    return li;
-  }));
+  $('list').replaceChildren(...txs.map(rowFor));
   updateCount();
+  updateBadge();
 }
 
-function selected() { return txs.filter((t) => t.selected && !t.done); }
+async function setIgnored(t, on) {
+  const list = (demo ? demoIgnored : settings.ignored).filter((s) => s !== t.sig);
+  if (on) list.push(t.sig);
+  if (demo) demoIgnored = list;
+  else { settings.ignored = list.slice(-MAX_IGNORED); await save({ ignored: settings.ignored }); }
+  t.ignored = on;
+  t.selected = false;
+  // An ignored row stops claiming a Wallet record, and a restored one needs matching again.
+  Object.assign(t, { done: false, likely: false, typeMismatch: false, match: undefined });
+  reanalyse();
+}
+
+// The number of new transactions on the toolbar icon, while the panel is open.
+function updateBadge() {
+  if (demo || activeTabId == null) return;
+  const n = txs.filter(isFresh).length;
+  const quiet = (p) => Promise.resolve(p).catch(() => {}); // the badge is decoration: the tab may have closed
+  quiet(chrome.action.setBadgeText({ tabId: activeTabId, text: n ? String(n) : '' }));
+  if (n) quiet(chrome.action.setBadgeBackgroundColor({ tabId: activeTabId, color: cssVar('--md-primary') || '#005bc0' }));
+}
+
+function selected() { return txs.filter((t) => t.selected && !t.done && !t.ignored); }
+
 // Gives the matched Wallet records the bank's description (in the note), so they show as "In Wallet" from now on.
 // Only the note is patched: the amount already matched, and payer, category and labels stay as they are.
 async function replace(batch) {
-  batch = batch.filter((t) => t.likely && (demo || t.match?.id));
+  batch = batch.filter((t) => t.likely && !t.typeMismatch && (demo || t.match?.id));
   if (!batch.length) return;
+  busy = true;
   setStatus(`Updating ${batch.length} Wallet record${batch.length === 1 ? '' : 's'}…`);
   try {
     const results = demo
@@ -176,54 +523,124 @@ async function replace(batch) {
     if (failed.length) setStatus(`Updated ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
     else setStatus(demo ? `Demo: pretended to update ${batch.length}. Nothing was sent.` : `Updated ${batch.length} in Wallet.`);
   } catch (e) { setStatus(e.message, 'error'); }
+  finally { busy = false; }
 }
 
 $('replaceAll').onclick = () => replace(txs.filter((t) => t.likely));
 
 function updateCount() {
-  const likely = txs.filter((t) => t.likely).length;
+  const likely = txs.filter((t) => t.likely && !t.typeMismatch).length;
   $('replaceAll').hidden = !likely;
   $('replaceAll').textContent = `Replace ${likely} likely`;
   const n = selected().length;
   $('count').textContent = `${n} selected`;
   $('sync').textContent = n ? `Add ${n} to Wallet` : 'Add to Wallet';
-  $('sync').disabled = !n;
+  $('sync').disabled = !n || !accountId;
 }
 
-$('toggleAll').onchange = (e) => { txs.forEach((t) => { if (!t.done && !t.likely) t.selected = e.target.checked; }); render(); };
+$('toggleAll').onchange = (e) => { txs.forEach((t) => { if (isFresh(t) && !t.unsure) t.selected = e.target.checked; }); render(); };
+
+$('clear').onclick = () => {
+  collectedRaw = []; txs = []; lastSig = '';
+  $('results').hidden = true; $('payload').hidden = true;
+  updateBadge();
+  setStatus('List cleared. Pages you visit from now on are collected again.');
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// Compare / preview / add / undo.
 
 // Shows how each side was parsed (local only), to see why a transaction didn't match its Wallet record.
-$('compare').onclick = () => {
-  const rows = (list) => list.map((x) => `${x.date}  ${x.amount}  ${x.type || '-'}  ${x.desc}`);
+$('compare').onclick = async () => {
+  // Also report how the real page marks amounts and accounts (digits masked), to debug. Skipped for demo data.
+  let pageInfo = [];
+  if (!demo) {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const diag = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: diagnosePage });
+      pageInfo = diag.map((f) => f.result).filter((r) => r?.amountCells?.length)
+        .map((r) => JSON.stringify({ amountCells: r.amountCells, amountShapes: r.amountShapes }, null, 2));
+    } catch (e) { /* the comparison below is still useful */ }
+  }
+  const mask = (s) => (s || '').replace(/\d/g, '9');
+  const rows = (list) => list.map((x) => `${x.date}  ${x.amount}  ${x.type || '-'}  ${x.desc}` + (x.source ? `  [${x.source}, ${x.state || '?'}, updated ${x.updatedAt || '?'}]` : ''));
   $('payload').textContent = [
+    `Using Wallet account: ${nameOf(accountId)}. Bank account seen on the page: ${bank ? `"${mask(bank.label)}" last digits ${mask(bank.digits) || 'none'}` : 'not detected'}`,
     'Wallet record fields: ' + JSON.stringify(walletRecords.sample || null),
     '', `Wallet records (${walletRecords.length}), as read: date  amount  type  description`, ...rows(walletRecords),
     '', `Bank transactions (${txs.length}), as read: date  amount  type  description`,
     ...rows(txs.map((t) => ({ date: t.date, amount: Math.abs(t.amount), type: t.amount < 0 ? 'expense' : 'income', desc: t.desc }))),
+    ...(pageInfo.length ? ['', 'How the page marks amounts (digits masked):', ...pageInfo] : []),
   ].join('\n');
   $('payload').hidden = !$('payload').hidden;
 };
 
+const toRecord = (t) => toWalletRecord(t, accountId, currencyOf(accountId));
+
 $('preview').onclick = () => {
-  const records = selected().map((t) => toWalletRecord(t, settings.accountId, settings.currency));
-  $('payload').textContent = JSON.stringify(records, null, 2);
+  $('payload').textContent = JSON.stringify(selected().map(toRecord), null, 2);
   $('payload').hidden = !$('payload').hidden;
 };
 
 $('sync').onclick = async () => {
   const batch = selected();
+  if (!batch.length || !accountId) return;
   $('sync').disabled = true;
+  busy = true;
   setStatus(`Adding ${batch.length} to Wallet…`);
   try {
     const results = demo
-      ? batch.map(() => ({ success: true }))
-      : await createRecords(settings.token, batch.map((t) => toWalletRecord(t, settings.accountId, settings.currency)));
-    const failed = [];
-    results.forEach((r, i) => { if (r.success) { batch[i].done = true; batch[i].selected = false; } else failed.push(r.error); });
+      ? batch.map((_, i) => ({ success: true, id: `demo-${i}` }))
+      : await createRecords(settings.token, batch.map(toRecord));
+    const failed = [], groups = [];
+    results.forEach((r, i) => {
+      if (r.success) {
+        batch[i].done = true; batch[i].selected = false;
+        if (r.id) groups.push([r.id, ...(r.createdMirrorRecordId ? [r.createdMirrorRecordId] : [])]);
+      } else failed.push(r.error);
+    });
     render();
-    if (failed.length) setStatus(`Added ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
-    else setStatus(demo ? `Demo: pretended to add ${batch.length}. Nothing was sent.` : `Added ${batch.length} to Wallet.`);
+    if (groups.length) {
+      lastAdd = { groups, at: Date.now(), ...(demo && { demo: true }) };
+      if (!demo) save({ lastAdd });
+      showUndo();
+    }
+    const added = batch.length - failed.length;
+    if (failed.length) setStatus(`Added ${added}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
+    else setStatus(demo ? `Demo: pretended to add ${added}. Nothing was sent.` : `Added ${added} to Wallet. You can undo this for 15 minutes.`);
+    if (!demo && added) refreshAccounts(true);
   } catch (e) { setStatus(e.message, 'error'); updateCount(); }
+  finally { busy = false; }
+};
+
+// The Undo button shows for 15 minutes after an add. It deletes exactly the records that add created (and the mirror
+// side of any transfer), so nothing else in Wallet is touched.
+function showUndo() {
+  const live = lastAdd && Date.now() - lastAdd.at < UNDO_WINDOW_MS;
+  if (lastAdd && !live) { lastAdd = null; if (settings?.lastAdd) save({ lastAdd: null }); }
+  $('undo').hidden = !live;
+  if (live) $('undo').textContent = `Undo last add (${lastAdd.groups.length})`;
+}
+
+$('undo').onclick = async () => {
+  if (!lastAdd) return;
+  const { groups, demo: wasDemo } = lastAdd;
+  busy = true;
+  setStatus('Removing what was just added…');
+  try {
+    const out = wasDemo ? { deleted: groups.length, failed: [] } : await deleteRecords(settings.token, groups);
+    if (out.failed.length) {
+      setStatus(`Removed ${out.deleted}. ${out.failed.length} could not be removed: ${[...new Set(out.failed)].join('; ')}`, 'error');
+    } else {
+      lastAdd = null;
+      if (!wasDemo) save({ lastAdd: null });
+      setStatus(wasDemo ? 'Demo: pretended to undo. Nothing was sent.' : `Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'} from Wallet.`);
+      if (wasDemo) txs.forEach((t) => { if (t.done && !t.match) { t.done = false; t.selected = true; } });
+    }
+    showUndo();
+    if (!wasDemo) { await refreshAccounts(true); busy = false; await reanalyse(); } else render();
+  } catch (e) { setStatus(e.message, 'error'); }
+  finally { busy = false; }
 };
 
 init();

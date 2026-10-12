@@ -1,24 +1,28 @@
 # Privacy Policy
 
-_Bank to Wallet Sync · last updated 12 October 2026_
+_Bank to Wallet Sync · last updated 13 October 2026_
 
-Bank to Wallet Sync is a browser extension that reads the transaction table on a Maybank2u page you have open and adds new transactions to your BudgetBakers Wallet account. This policy explains what it does with your data.
+Bank to Wallet Sync is a browser extension that reads the transaction table on a supported bank page you have open and adds new transactions to your BudgetBakers Wallet account. This policy explains what it does with your data.
 
 ## What the extension accesses
-- **Transactions on the Maybank2u page you are viewing.** The date, description and amount of each row are read from the page, only when you click **Read transactions on this page**. The extension never reads your login details, account numbers, balances or anything outside the transaction table, and it does not run on pages other than `maybank2u.com.my`.
-- **Your Wallet API token, chosen account and currency.** You enter these in Settings. They are stored in the extension's local storage (`chrome.storage.local`) in your browser only.
-- **Your existing Wallet records for the relevant date range.** These are fetched from Wallet so the extension can avoid creating duplicates.
+- **Transactions on the bank page you are viewing.** The date, description and amount of each row, and (to pick the right Wallet account) the name and last four digits of the bank account the page shows. They are read only while the side panel is open on a supported bank tab: when you open it, and again when the page or tab changes. You can also click **Read transactions on this page** to read on demand, or turn automatic reading off in Settings so the page is read only when you click. Nothing is read when the panel is closed. The extension only notes that the page changed (no page content is sent anywhere) and re-reads the page locally. It never reads your login details, full account numbers, or anything outside the transaction table and the account heading, and it does not run on pages other than supported banks.
+- **Your Wallet API token.** You enter it in Settings. It is stored in the extension's local storage (`chrome.storage.local`) in your browser only.
+- **Your Wallet data**, fetched from Wallet using your token so the extension can avoid duplicates and fill in categories: your accounts (names, balances), your existing records for the dates being synced and for roughly the last six months (to learn categories), your categorisation rules and your category list.
+
+## What the extension stores on your computer
+Only in this browser's extension storage, never sent anywhere except as described below: your token; your default Wallet account and currency; which Wallet account you chose for each bank account; your transfer rules; the categories you picked by hand for particular merchants; the rows you chose not to sync; the identifiers of the records created by your last "Add" (so "Undo" can remove them, kept for 15 minutes); your behaviour settings; and the names of your Wallet accounts (so Settings can offer them). Forgetting the remembered choices is one click in Settings, and uninstalling the extension removes everything.
 
 ## Where data goes
-- Transactions you choose to add, and the requests used to check for duplicates, are sent **directly from your browser to the official BudgetBakers Wallet API** (`https://rest.budgetbakers.com`) using your own API token.
+- Transactions you choose to add, the requests used to check for duplicates, categories and balances, and "Undo" requests are sent **directly from your browser to the official BudgetBakers Wallet API** (`https://rest.budgetbakers.com`) using your own API token. "Undo" deletes only the records the extension itself created in your last add.
+- The extension loads nothing from the internet apart from the Wallet API: its font is bundled, not fetched.
 - **Nothing is sent to the developer or to any other third party.** There is no server run by the developer, no analytics, no telemetry, no advertising and no tracking.
-- Bank data is not stored by the extension. It exists in memory while the side panel is open and is discarded afterwards.
+- Bank data is not stored by the extension. It exists in memory while the side panel is open and is discarded afterwards. (The only exception is the optional "ignore this row" list, which stores a short fingerprint of a row's date, description and amount on your computer so it stays ignored.)
 
 ## Sharing, selling and use
 Your data is not sold, shared or used for any purpose other than the single purpose of copying the transactions you select into your own Wallet account. It is not used for creditworthiness, lending or advertising.
 
 ## Your control
-- Nothing is written to Wallet until you review the list and click **Add to Wallet**.
+- Nothing is written to Wallet until you review the list and click **Add to Wallet**, and you can undo an add for 15 minutes.
 - You can remove the stored token and settings at any time by clearing them in Settings or by uninstalling the extension.
 - Data already added to Wallet is governed by BudgetBakers' own privacy policy and can be edited or deleted there.
 

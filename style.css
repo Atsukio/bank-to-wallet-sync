@@ -1,26 +1,69 @@
-/* Material Design 3 colour roles, from a teal seed (light and dark schemes). */
+/* Roboto is the Material Design 3 typeface. Bundled (variable weight, Latin) so no font is fetched at runtime. */
+@font-face {
+  font-family: Roboto; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url(fonts/roboto-latin.woff2) format('woff2');
+}
+
+/* BEGIN GENERATED M3 TOKENS (node tools/palette.cjs "#1a73e8" --write) */
+/* Material Design 3 colour roles generated from seed #1a73e8 (light, then dark). Do not edit by hand. */
 :root {
-  --md-primary: #006a60; --md-on-primary: #ffffff;
-  --md-primary-container: #9ef2e3; --md-on-primary-container: #00201c;
-  --md-surface: #f4fbf8; --md-on-surface: #161d1c; --md-on-surface-variant: #3f4947;
-  --md-surface-container: #e9efec; --md-surface-container-high: #e3eae7;
-  --md-outline: #6f7977; --md-outline-variant: #bec9c6;
+  --md-primary: #005bc0;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #d8e2ff;
+  --md-on-primary-container: #004493;
+  --md-secondary: #585c7e;
+  --md-secondary-container: #dfe0ff;
+  --md-on-secondary-container: #414465;
+  --md-tertiary: #615789;
+  --md-tertiary-container: #e7deff;
+  --md-on-tertiary-container: #494070;
   --md-error: #ba1a1a;
-  /* M3 has no income/warning roles; these are custom colours tuned to the same tones. */
-  --credit: #1b6b3a; --warn: #7a5900;
-  font: 13px/1.5 Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
-  color-scheme: light dark;
+  --md-error-container: #ffdad6;
+  --md-on-error-container: #93000a;
+  --md-surface: #f9f9ff;
+  --md-on-surface: #181c25;
+  --md-on-surface-variant: #424753;
+  --md-surface-container: #ebedfa;
+  --md-surface-container-high: #e5e8f5;
+  --md-outline: #727785;
+  --md-outline-variant: #c2c6d6;
+  --credit: #005734;
+  --warn: #673d09;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --md-primary: #82d5c7; --md-on-primary: #003731;
-    --md-primary-container: #005048; --md-on-primary-container: #9ef2e3;
-    --md-surface: #0e1514; --md-on-surface: #dde4e1; --md-on-surface-variant: #bec9c6;
-    --md-surface-container: #1a2120; --md-surface-container-high: #252b2a;
-    --md-outline: #899390; --md-outline-variant: #3f4947;
+    --md-primary: #adc7ff;
+    --md-on-primary: #002e68;
+    --md-primary-container: #004493;
+    --md-on-primary-container: #d8e2ff;
+    --md-secondary: #c1c4eb;
+    --md-secondary-container: #414465;
+    --md-on-secondary-container: #dfe0ff;
+    --md-tertiary: #cbbff8;
+    --md-tertiary-container: #494070;
+    --md-on-tertiary-container: #e7deff;
     --md-error: #ffb4ab;
-    --credit: #8bd99f; --warn: #e9c16c;
+    --md-error-container: #93000a;
+    --md-on-error-container: #ffdad6;
+    --md-surface: #0f131c;
+    --md-on-surface: #dfe2ef;
+    --md-on-surface-variant: #c2c6d6;
+    --md-surface-container: #1c2029;
+    --md-surface-container-high: #262a33;
+    --md-outline: #8c909f;
+    --md-outline-variant: #424753;
+    --credit: #72db9f;
+    --warn: #ffb86e;
   }
+}
+/* END GENERATED M3 TOKENS */
+
+:root {
+  /* M3 type scale: body-large 16/24 +0.5 is the base. Others used: body-medium 14/20 +0.25 (secondary lines),
+     label-large 14/20 500 +0.1 (buttons), label-medium 12/16 500 +0.5 (chips), title-large 22/28 (headings). */
+  font: 400 16px/24px Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: .5px;
+  color-scheme: light dark;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--md-surface); color: var(--md-on-surface); }
@@ -31,7 +74,7 @@ input[type=checkbox] { accent-color: var(--md-primary); }
 /* Outlined button; .primary is the filled button. Both are fully rounded, as in M3. */
 button {
   position: relative; border: 1px solid var(--md-outline); background: transparent; color: var(--md-primary);
-  padding: 8px 16px; border-radius: 20px; cursor: pointer; font-weight: 500; letter-spacing: .01em;
+  padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 14px; line-height: 20px; font-weight: 500; letter-spacing: .1px;
 }
 button:hover:not(:disabled) { background: color-mix(in srgb, var(--md-primary) 8%, transparent); }
 button:active:not(:disabled) { background: color-mix(in srgb, var(--md-primary) 12%, transparent); }
@@ -42,8 +85,20 @@ button:disabled { opacity: .38; cursor: default; }
 button.primary:disabled { background: color-mix(in srgb, var(--md-on-surface) 12%, transparent); color: var(--md-on-surface); opacity: .38; }
 button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 2px; }
 
+/* Round icon-only button (M3 standard icon button). */
+button.icon-btn {
+  width: 40px; height: 40px; padding: 0; border: none; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; color: var(--md-on-surface-variant);
+}
+
+/* Small tonal label ("In Wallet", "Likely in Wallet"): a container colour with its matching on- colour. */
+.chip { display: inline-block; padding: 0 8px; border-radius: 8px; font-size: 12px; font-weight: 500; line-height: 20px; letter-spacing: .5px; white-space: nowrap; }
+.chip.in { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.chip.likely { background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); }
+.chip.check { background: var(--md-error-container); color: var(--md-on-error-container); }
+
 a { color: var(--md-primary); }
 .muted { color: var(--md-on-surface-variant); }
-.status { min-height: 1.4em; margin: 8px 0; }
+.status { min-height: 24px; margin: 8px 0; }
 .status.error { color: var(--md-error); }
 .status.warn { color: var(--warn); }

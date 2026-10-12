@@ -1,28 +1,113 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>Bank to Wallet Sync settings</title><link rel="stylesheet" href="style.css">
+<html lang="en"><head><meta charset="utf-8"><title>Bank to Wallet Sync settings</title><link rel="stylesheet" href="style.css">
 <style>
   body { max-width: 520px; margin: 32px auto; padding: 0 16px; }
-  h1 { font-size: 18px; }
-  label { display: block; font-weight: 600; margin: 18px 0 6px; }
+  h1 { font: 400 28px/36px Roboto, system-ui, sans-serif; letter-spacing: 0; margin: 0 0 8px; }
+  label { display: block; font-weight: 500; letter-spacing: .1px; margin: 18px 0 6px; }
   input, select { width: 100%; padding: 8px; border: 1px solid var(--md-outline); border-radius: 4px; background-color: var(--md-surface); }
   .row { display: flex; gap: 8px; } .row select { flex: 1; }
-  p.hint { margin: 6px 0 0; font-size: 12px; }
+  p.hint { margin: 6px 0 0; font-size: 14px; line-height: 20px; letter-spacing: .25px; }
   .save { margin-top: 22px; }
+  h2 { font: 500 22px/28px Roboto, system-ui, sans-serif; letter-spacing: 0; color: var(--md-primary); margin: 36px 0 6px; }
+  ul.banks { margin: 0; padding-left: 20px; }
+  [hidden] { display: none !important; }
+  /* getting-started card */
+  .welcome { margin: 16px 0 0; padding: 16px 20px; border-radius: 16px; background: var(--md-primary-container); color: var(--md-on-primary-container); }
+  .welcome h2 { color: inherit; margin: 0 0 8px; font-size: 20px; line-height: 28px; }
+  .welcome ol { margin: 0; padding-left: 20px; } .welcome li { margin: 4px 0; }
+  /* transfer rules */
+  .rule-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .rule-row input { flex: 1; } .rule-row select { flex: 1; width: auto; }
+  button.text { border: none; padding: 6px 12px; }
+  .inline { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; }
+  /* Material 3 switch rows */
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; font-weight: 400; margin: 16px 0 0; cursor: pointer; }
+  .switch-row b { display: block; font-weight: 500; }
+  .switch-row details { flex: 1; }
+  .switch-row summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; border-radius: 4px; }
+  .switch-row summary::-webkit-details-marker { display: none; }
+  .switch-row summary b { display: inline; font-weight: 500; }
+  .switch-row summary::after { content: ""; flex: none; width: 7px; height: 7px; margin-top: -3px; border: solid var(--md-on-surface-variant); border-width: 0 2px 2px 0; transform: rotate(45deg); transition: transform .15s; }
+  .switch-row details[open] summary::after { margin-top: 3px; transform: rotate(-135deg); }
+  .switch-row details small { margin-top: 6px; }
+  .switch-row small { display: block; color: var(--md-on-surface-variant); font-size: 14px; line-height: 20px; letter-spacing: .25px; margin-top: 2px; }
+  input.switch { appearance: none; -webkit-appearance: none; flex: none; width: 40px; height: 24px; padding: 0; position: relative; cursor: pointer;
+    border: 2px solid var(--md-outline); border-radius: 12px; background: var(--md-surface-container-high); transition: background .15s, border-color .15s; }
+  input.switch::before { content: ""; position: absolute; top: 50%; left: 4px; width: 12px; height: 12px; border-radius: 50%;
+    background: var(--md-outline); transform: translateY(-50%); transition: left .15s, width .15s, height .15s, background .15s; }
+  input.switch:checked { background: var(--md-primary); border-color: var(--md-primary); }
+  input.switch:checked::before { left: 14px; width: 18px; height: 18px; background: var(--md-on-primary); }
 </style></head>
 <body>
   <h1>Settings</h1>
+
+  <section class="welcome" id="welcome" hidden>
+    <h2>Getting started</h2>
+    <ol>
+      <li>In the Wallet web app, open Settings → REST API and create an API token (needs Premium).</li>
+      <li>Paste it below, press <b>Load accounts</b>, pick the Wallet account for your bank account, then <b>Save settings</b>.</li>
+      <li>Open your bank's transaction history and click this extension's icon (or press Alt+Shift+W).</li>
+    </ol>
+    <p class="hint">Want a look first? Open the side panel anywhere you're allowed and press <b>Demo data</b>: nothing is sent to Wallet.</p>
+  </section>
 
   <label for="token">Wallet API token</label>
   <input id="token" type="password" autocomplete="off" spellcheck="false">
   <p class="hint muted">Generate it in Wallet web app → Settings → REST API (needs Premium). Stored only in this browser's extension storage.</p>
 
-  <label for="account">Wallet account to add transactions to</label>
+  <label for="account">Default Wallet account</label>
   <div class="row"><select id="account"><option value="">Load accounts first</option></select><button id="load">Load accounts</button></div>
+  <p class="hint muted">Used when the panel can't tell which bank account a page shows. Once you choose a Wallet account in the panel for a bank account, it is remembered for that one.</p>
 
   <label for="currency">Currency</label>
   <input id="currency" maxlength="3">
 
+  <h2>Behaviour</h2>
+  <div class="switch-row">
+    <details>
+      <summary><b>Only open on supported sites</b></summary>
+      <small>The toolbar button opens the side panel only on a supported bank. Elsewhere it shows a short "not supported" message. Turn off to open it on any site.</small>
+    </details>
+    <input type="checkbox" class="switch" role="switch" id="onlySupported" aria-label="Only open on supported sites">
+  </div>
+  <div class="switch-row">
+    <details>
+      <summary><b>Read transactions automatically</b></summary>
+      <small>Read the page when the panel opens and again whenever the page changes (next page, filters, another tab). Turn off to read only when you press the button.</small>
+    </details>
+    <input type="checkbox" class="switch" role="switch" id="autoRead" aria-label="Read transactions automatically">
+  </div>
+  <div class="switch-row">
+    <details>
+      <summary><b>Hide the panel when I switch away</b></summary>
+      <small>The panel hides when you switch to a tab where it isn't allowed, and returns when you come back. Turn off to keep it open as you switch tabs.</small>
+    </details>
+    <input type="checkbox" class="switch" role="switch" id="hideWhenAway" aria-label="Hide the panel when I switch away">
+  </div>
+  <div class="switch-row">
+    <details>
+      <summary><b>Collect transactions across pages</b></summary>
+      <small>Keep the transactions from every page you visit in the panel, so you can add several pages in one go. Use "Clear list" in the panel to start again. Off: the list shows only the current page.</small>
+    </details>
+    <input type="checkbox" class="switch" role="switch" id="collectPages" aria-label="Collect transactions across pages">
+  </div>
+  <p class="hint muted">Keyboard shortcut: Alt+Shift+W opens the panel. You can change it at chrome://extensions/shortcuts.</p>
+
+  <h2>Transfer rules</h2>
+  <p class="hint muted">When a bank description contains the words you enter, that row is created in Wallet as a transfer to the account you choose (Wallet adds the matching record on that account) instead of an ordinary expense. For example, "repayment" to your credit card. You can also turn any single row into a transfer in the panel.</p>
+  <div id="transferRules"></div>
+  <div class="inline"><button id="addRule">Add rule</button></div>
+
+  <h2>Remembered choices</h2>
+  <div class="inline"><span id="memoryText">Categories you picked by hand</span><button id="forgetCategories">Forget</button></div>
+  <div class="inline"><span id="ignoredText">Rows you chose not to sync</span><button id="clearIgnored">Clear</button></div>
+  <p class="hint muted">These live only in this browser. Forgetting them doesn't change anything in Wallet.</p>
+
   <div class="save"><button class="primary" id="save">Save settings</button></div>
   <p class="status" id="status"></p>
+
+  <h2>Supported banks</h2>
+  <ul class="banks" id="banks"></ul>
+  <p class="hint muted">The side panel only opens on a supported bank's website. Other banks would need their own page reader.</p>
   <script type="module" src="options.js"></script>
 </body></html>

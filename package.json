@@ -1,0 +1,19 @@
+{
+  "name": "bank-to-wallet-sync",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Chrome/Edge extension that copies bank transactions into BudgetBakers Wallet. Development tooling only: the extension itself has no dependencies.",
+  "license": "MIT",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "build": "node tools/build.cjs",
+    "palette": "node tools/palette.cjs",
+    "screenshots": "node tools/screenshots.mjs"
+  },
+  "devDependencies": {
+    "@material/material-color-utilities": "0.3.0",
+    "puppeteer-core": "^24.0.0",
+    "sharp": "^0.35.5"
+  }
+}

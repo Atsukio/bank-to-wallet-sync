@@ -1,0 +1,43 @@
+// The Web Store zip: a real zip, with everything the extension needs and nothing it doesn't.
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { check, finish, ROOT } from './helpers.mjs';
+
+const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+const run = spawnSync(process.execPath, [path.join(ROOT, 'tools/build.cjs')], { cwd: ROOT, encoding: 'utf8' });
+check('build succeeds (every referenced file is in the zip)', run.status === 0, run.stderr || run.stdout);
+
+const file = path.join(ROOT, 'dist', `bank-to-wallet-sync-${manifest.version}.zip`);
+check('zip is named after the manifest version', fs.existsSync(file), file);
+const zip = fs.readFileSync(file);
+check('it is a real zip (starts with PK), not a tar archive', zip.subarray(0, 2).toString() === 'PK');
+
+// list the entries through the central directory
+const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+const count = zip.readUInt16LE(eocd + 10);
+let p = zip.readUInt32LE(eocd + 16);
+const names = [];
+const contents = new Map();
+for (let i = 0; i < count; i++) {
+  const nlen = zip.readUInt16LE(p + 28), elen = zip.readUInt16LE(p + 30), clen = zip.readUInt16LE(p + 32), lho = zip.readUInt32LE(p + 42);
+  const name = zip.toString('utf8', p + 46, p + 46 + nlen);
+  const method = zip.readUInt16LE(p + 10), csize = zip.readUInt32LE(p + 20);
+  const start = lho + 30 + zip.readUInt16LE(lho + 26) + zip.readUInt16LE(lho + 28);
+  const raw = zip.subarray(start, start + csize);
+  names.push(name);
+  contents.set(name, method === 8 ? zlib.inflateRawSync(raw) : raw);
+  p += 46 + nlen + elen + clen;
+}
+check('manifest.json is at the root with forward-slash paths', names.includes('manifest.json') && names.every((n) => !n.includes('\\')));
+check('the zipped manifest matches the source', contents.get('manifest.json').toString() === fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+for (const must of ['background.js', 'popup.html', 'popup.js', 'options.html', 'unsupported.html', 'unsupported.js', 'sites.js', 'matching.js', 'wallet.js', 'scanner.js', 'style.css', 'fonts/roboto-latin.woff2', 'fonts/LICENSE-Apache-2.0.txt']) {
+  check(`zip contains ${must}`, names.includes(must));
+}
+check('development files stay out (tests, tools, node_modules, store assets, docs)', !names.some((n) => /^(tests|tools|node_modules|store|dist|\.github)\//.test(n) || /(\.md|package\.json|package-lock\.json)$/.test(n)));
+check('the manifest only asks for the permissions it needs', JSON.stringify(manifest.permissions.slice().sort()) === JSON.stringify(['activeTab', 'scripting', 'sidePanel', 'storage']), JSON.stringify(manifest.permissions));
+check('host access is limited to the supported bank and the Wallet API', manifest.host_permissions.every((h) => /maybank2u\.com\.my|rest\.budgetbakers\.com/.test(h)), JSON.stringify(manifest.host_permissions));
+check('no remote code or analytics hosts anywhere in the shipped scripts', ![...contents].filter(([n]) => n.endsWith('.js') || n.endsWith('.html')).some(([, c]) => /https?:\/\/(?!rest\.budgetbakers\.com|www\.maybank|[^'"\s]*maybank2u|localhost|schema)/.test(c.toString().replace(/https:\/\/github\.com\/[^\s'")]+|https:\/\/rest\.budgetbakers\.com[^\s'")]*|\/\^https[^\n]*/g, ''))));
+
+finish();
