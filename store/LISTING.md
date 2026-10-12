@@ -35,6 +35,9 @@ REQUIREMENTS
 • A BudgetBakers Wallet Premium account (the REST API is Premium only) and an API token (Wallet web app → Settings → REST API).
 • Currently supports Maybank2u (M2U) Malaysia only.
 
+A NOTE FROM THE DEVELOPER
+I built this for my own use and to share with friends. If it fits your needs too, you're more than welcome to use it. It's a small personal project, so updates may be occasional.
+
 Not affiliated with or endorsed by Malayan Banking Berhad (Maybank) or BudgetBakers. "Maybank" and "Wallet" are trademarks of their respective owners.
 
 Source code: https://github.com/Atsukio/bank-to-wallet-sync

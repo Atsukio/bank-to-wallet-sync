@@ -1,5 +1,7 @@
 # Bank to Wallet Sync
 
+> **A note on this project:** I built this for my own use and to share with friends. It does what I need and isn't a polished product, but if it fits your needs too, you're more than welcome to use it. Issues and suggestions are welcome, though I can't promise to act on them quickly.
+
 A Chrome/Edge extension. You log in to your bank yourself as usual; the extension only reads the transaction table already on screen and adds new rows to BudgetBakers Wallet via the official REST API.
 
 **Supported banks:** Maybank2u (M2U) for now. The page reader is in `scanner.js`, and the popup only runs on `maybank2u.com.my` pages (see `host_permissions` in `manifest.json` and the URL check in `popup.js`) — more banks would need an entry in both.
