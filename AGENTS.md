@@ -106,9 +106,27 @@ Not coverable headless, so verify in a real browser when touching them: the serv
 3. Update `store/LISTING.md` and `PRIVACY.md` if permissions or behaviour changed (the store's data-usage answers must match). `npm run screenshots` after visible UI changes.
 4. Upload `dist/bank-to-wallet-sync-<version>.zip`.
 
+## Commit messages
+All commits follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
+
+```text
+<type>(<optional scope>)<optional !>: <imperative summary, lower case, no full stop>
+
+<optional body: what changed and why, wrapped at 72 columns>
+
+<optional footers: BREAKING CHANGE: ..., Co-Authored-By: ...>
+```
+
+- **Types:** `feat` (user-visible feature), `fix` (bug fix), `docs`, `refactor`, `test`, `ci`, `build`, `chore`, `perf`, `style`, `revert`.
+- **Scope** is optional: `panel`, `scanner`, `matching`, `wallet`, `settings`, `background`, `sites`, `store`, `theme`. For example, `fix(scanner): read the sign from the debit column`.
+- **Breaking changes:** put `!` after the type/scope and add a `BREAKING CHANGE:` footer that explains how to migrate (for example, stored settings that are reset).
+- **Versioning:** the commits since the last release decide the next `manifest.json` version. Any breaking change means a major bump, otherwise any `feat` means minor, otherwise any `fix` means patch. `docs`, `ci`, `chore` and similar commits on their own don't need a release. A release commit is `chore(release): vX.Y.Z`.
+- Commits made by an AI agent end with its `Co-Authored-By` trailer as the last footer.
+- Commits before 2026-10-14 predate this rule. Don't rewrite history to fix them.
+
 ## Working with the owner
 - They test on the real Maybank2u page and report back with screenshots; expect real values in them. Do not repeat or store those values.
-- They ask for commits and pushes explicitly. Don't push unprompted; offer when a coherent set of changes is ready. Commit messages end with the `Co-Authored-By` line from the session's attribution instructions. Git identity is configured globally.
+- They ask for commits and pushes explicitly. Don't push unprompted; offer when a coherent set of changes is ready. Commit messages follow [Commit messages](#commit-messages) and end with the `Co-Authored-By` line from the session's attribution instructions. Git identity is configured globally.
 - They iterate on look and feel (colour, size, density) from screenshots: show a render before and after.
 
 ## Status as of 2026-10-13
