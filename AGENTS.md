@@ -131,10 +131,10 @@ All commits follow [Conventional Commits 1.0.0](https://www.conventionalcommits.
 - They ask for commits and pushes explicitly. Don't push unprompted; offer when a coherent set of changes is ready. Commit messages follow [Commit messages](#commit-messages) and end with the `Co-Authored-By` line from the session's attribution instructions. Git identity is configured globally.
 - They iterate on look and feel (colour, size, density) from screenshots: show a render before and after.
 
-## Status as of 2026-10-13
-- Pushed: v0.1.1 and the personal-project note. The pushed `dist/…0.1.1.zip` is a tar archive, not a zip (see Releasing).
-- **Uncommitted, intended as v0.1.2** (manifest already bumped, zip built with the new tool): auto-read, balance, sign fixes, Wallet refresh on tab return, void/sync handling, category learning and manual change, Material 3 vibrant-blue palette, Roboto type scale, three/four behaviour switches, per-bank-account Wallet account mapping, transfers, undo, ignore list, type-mismatch flag, collect-across-pages, toolbar badge, Alt+Shift+W shortcut, first-run guide, `sites.js` refactor, tests + build tool + CI, regenerated docs and store images.
-- Unverified in a real browser: the service worker behaviours, `detectAccount` on Maybank2u, and live Wallet transfers / delete / `GET /categories`. Treat Undo and transfers cautiously on first use (one transaction).
+## Status as of 2026-10-15 (v0.2.0)
+- Released in git: v0.1.1, v0.1.2 and v0.2.0 (`chore(release): v0.2.0`). The 0.1.0/0.1.1 zips committed earlier were tar archives (see Releasing); 0.1.2 onwards are real zips from `tools/build.cjs`.
+- Web Store: the owner is submitting it. Upload `dist/bank-to-wallet-sync-<version>.zip`; listing text, data-usage answers and reviewer test instructions (use Demo data; turn off "Only open on supported sites" first) are in `store/LISTING.md`.
+- Unverified in a real browser or against the live Wallet API: the service worker behaviours, `detectAccount` on Maybank2u, transfers, Undo (DELETE), `GET /categories`, and Fix in Wallet (PATCH amount). Treat them cautiously on first use (one transaction).
 - Not done: more banks (needs sample pages from each bank; the scanner is header-based so a table-style bank may mostly need a `sites.js` entry and a manifest host), reading the bank's own balance, Firefox.
-- Known gap: screenshot 2/3 content is generated from demo data and will drift from the UI if the demo changes; rerun `npm run screenshots`.
+- Store images are generated from demo data; rerun `npm run screenshots` after visible UI changes.
 - The licence holder is "Atsukio" (MIT). "Maybank" appears in the store listing with a non-affiliation disclaimer; reviewers may still flag it.
