@@ -1,7 +1,7 @@
 import { scanPage, diagnosePage, watchPage, detectAccount } from './scanner.js';
 import {
   getSettings, listAccounts, balanceOf, listCategories, existingRecords, listRules, matchRule, categoryHistory, guessCategory,
-  memoryKey, toWalletRecord, recordText, createRecords, updateRecords, deleteRecords,
+  memoryKey, sameDescription, toWalletRecord, recordText, createRecords, updateRecords, deleteRecords,
 } from './wallet.js';
 import { signature, matchRecords, carryOver, matchTransferRule } from './matching.js';
 import { isSupportedUrl } from './sites.js';
@@ -16,6 +16,8 @@ const MAX_IGNORED = 2000, MAX_REMEMBERED = 500;
 let settings;
 let txs = [], walletRecords = [], collectedRaw = [];
 let demo = false, busy = false;
+let rerun = null;         // a read requested while busy; runs when the current work finishes
+let pendingButton = null, pendingText = '';
 let demoIgnored = []; // in demo mode "Ignore" is remembered for the session only, never saved
 let accounts = [], categories = [];
 let bank = null;          // { label, digits } the page seems to be showing (see detectAccount)
@@ -34,6 +36,31 @@ const ready = () => Boolean(settings?.token);
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 $('openSettings').onclick = (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); };
+
+// ---------------------------------------------------------------------------------------------------------------
+// Busy state. Anything that talks to Wallet shows a progress bar and, when the user started it, locks the controls
+// (the inert attribute: no clicks, no focus) so a second click can't start a second request. The button that was
+// pressed shows a spinner and what it is doing. Automatic refreshes show only the bar, so they never dim the panel.
+function setBusy(on, { lock = true, button = null, label = '' } = {}) {
+  busy = on;
+  $('progress').hidden = !on;
+  $('app').inert = on && lock;
+  document.body.setAttribute('aria-busy', String(on));
+  if (on && button) {
+    pendingButton = button;
+    pendingText = button.textContent;
+    button.textContent = label;
+    button.classList.add('pending');
+  }
+  if (on) return;
+  if (pendingButton) {
+    pendingButton.classList.remove('pending');
+    if (pendingButton.isConnected) pendingButton.textContent = pendingText;
+    pendingButton = null;
+  }
+  updateCount(); showUndo(); // these own the text of Add, Replace-all and Undo
+  if (rerun) { const next = rerun; rerun = null; setTimeout(() => readPage(next), 0); }
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Accounts: which Wallet account this page's transactions belong to.
@@ -125,7 +152,8 @@ async function init() {
     renderAccount();
     return;
   }
-  await refreshAccounts();
+  setBusy(true, { lock: false });
+  try { await refreshAccounts(); } finally { setBusy(false); }
   readPage({ auto: true });
 }
 
@@ -134,8 +162,16 @@ async function init() {
 //          when there is nothing to show, and it leaves the list alone if the transactions haven't changed.
 //   quiet: refresh in place without blanking the list first (used after changing account, ignoring a row, undoing).
 //   force: re-check Wallet even if the bank's transactions are unchanged (records may have been added or deleted there).
-async function readPage({ auto = false, quiet = false, force = false } = {}) {
-  if (busy || (auto && (demo || !ready() || !settings.autoRead))) return;
+async function readPage(opts = {}) {
+  const { auto = false, quiet = false } = opts;
+  if (auto && (demo || !ready() || !settings.autoRead)) return;
+  // Something is already in flight: do this once it finishes (the newest request wins, and force sticks).
+  if (busy) { rerun = { ...opts, force: opts.force || rerun?.force }; return; }
+  setBusy(true, { lock: !auto, button: auto || quiet ? null : $('read'), label: 'Reading…' });
+  try { await readPageNow(opts); } finally { setBusy(false); }
+}
+
+async function readPageNow({ auto = false, quiet = false, force = false } = {}) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   activeTabId = tab?.id ?? null;
   if (!isSupportedUrl(tab?.url)) {
@@ -183,11 +219,8 @@ async function readPage({ auto = false, quiet = false, force = false } = {}) {
     return;
   }
   if (demo) leaveDemo();
-  busy = true;
-  try {
-    await refreshAccounts();
-    await analyse(raw);
-  } finally { busy = false; }
+  await refreshAccounts();
+  await analyse(raw);
 }
 
 $('read').onclick = async () => {
@@ -244,7 +277,8 @@ async function exitDemo({ read = true } = {}) {
   $('results').hidden = true; $('payload').hidden = true;
   setStatus(ready() ? '' : 'Add your Wallet API token in Settings first (the cog above).', ready() ? '' : 'warn');
   updateBadge();
-  if (ready()) await refreshAccounts(); else renderAccount();
+  setBusy(true);
+  try { if (ready()) await refreshAccounts(); else renderAccount(); } finally { setBusy(false); }
   showUndo();
   if (read) readPage({ auto: true, force: true });
 }
@@ -344,7 +378,7 @@ async function analyse(raw) {
   const mismatched = txs.filter((t) => t.typeMismatch).length;
   const parts = [fresh ? `${fresh} new of ${txs.length} found.` : `No new transactions among the ${txs.length} found.`];
   if (likely - mismatched) parts.push(`${likely - mismatched} look like they're already in Wallet (unticked).`);
-  if (mismatched) parts.push(`${mismatched} match a Wallet record of the opposite type, which needs fixing in Wallet.`);
+  if (mismatched) parts.push(`${mismatched} match a Wallet record of the opposite type: use "Fix in Wallet" to correct it.`);
   const bad = ruleNote || mismatched;
   setStatus((demo ? 'DEMO DATA, nothing will be sent to Wallet. ' : '') + parts.join(' ') + ruleNote, bad ? 'warn' : '');
   render();
@@ -443,10 +477,15 @@ function rowFor(t) {
   li.querySelector('input').onchange = (e) => { t.selected = e.target.checked; updateCount(); };
 
   if (t.likely && t.typeMismatch) {
-    li.append(line('match unsure', `Wallet has this as ${t.match?.type || 'the other type'}, but the bank shows ${t.amount < 0 ? 'an expense' : 'income'}. Fix or delete it in Wallet.`));
+    const shown = `Wallet has this as ${t.match?.type || 'the other type'}, but the bank shows ${t.amount < 0 ? 'an expense' : 'income'}.`;
+    if (t.match?.transfer) li.append(line('match unsure', `${shown} It's a transfer in Wallet, so fix it there.`));
+    else {
+      li.append(line('match unsure', shown, button('Fix in Wallet', (e) => fixType([t], e.currentTarget),
+        { title: `Change the Wallet record's amount to ${fmt(t.amount)} so its type matches the bank. Category, note and labels are kept.` })));
+    }
   } else if (t.likely) {
     li.append(line('match', `In Wallet as: ${t.match?.desc || '(no description found)'}`,
-      button('Replace', () => replace([t]), { title: "Set this Wallet record's note to the bank's description. Amount, payer, category and labels are kept." })));
+      button('Replace', (e) => replace([t], e.currentTarget), { title: "Set this Wallet record's note to the bank's description. Amount, payer, category and labels are kept." })));
   }
   if (t.ignored) li.append(line('match', "Ignored: this row won't be synced.", button('Restore', () => setIgnored(t, false))));
   if (!fresh) return li;
@@ -508,10 +547,10 @@ function selected() { return txs.filter((t) => t.selected && !t.done && !t.ignor
 
 // Gives the matched Wallet records the bank's description (in the note), so they show as "In Wallet" from now on.
 // Only the note is patched: the amount already matched, and payer, category and labels stay as they are.
-async function replace(batch) {
+async function replace(batch, button = null) {
   batch = batch.filter((t) => t.likely && !t.typeMismatch && (demo || t.match?.id));
-  if (!batch.length) return;
-  busy = true;
+  if (!batch.length || busy) return;
+  setBusy(true, { button, label: 'Replacing…' });
   setStatus(`Updating ${batch.length} Wallet record${batch.length === 1 ? '' : 's'}…`);
   try {
     const results = demo
@@ -523,15 +562,50 @@ async function replace(batch) {
     if (failed.length) setStatus(`Updated ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
     else setStatus(demo ? `Demo: pretended to update ${batch.length}. Nothing was sent.` : `Updated ${batch.length} in Wallet.`);
   } catch (e) { setStatus(e.message, 'error'); }
-  finally { busy = false; }
+  finally { setBusy(false); }
 }
 
-$('replaceAll').onclick = () => replace(txs.filter((t) => t.likely));
+$('replaceAll').onclick = () => replace(txs.filter((t) => t.likely), $('replaceAll'));
+
+// Corrects a Wallet record saved with the wrong type (an expense recorded as income, or the other way round): its
+// amount is set to the bank's signed amount, which also sets the type. Only the amount changes. If the description
+// differs too, the row becomes "Likely in Wallet" so Replace is still offered for the note.
+const canFix = (t) => t.likely && t.typeMismatch && !t.match?.transfer && (demo || t.match?.id);
+async function fixType(batch, button = null) {
+  batch = batch.filter(canFix);
+  if (!batch.length || busy) return;
+  setBusy(true, { button, label: 'Fixing…' });
+  setStatus(`Fixing ${batch.length} Wallet record${batch.length === 1 ? '' : 's'}…`);
+  try {
+    const results = demo
+      ? batch.map(() => ({ success: true }))
+      : await updateRecords(settings.token, batch.map((t) => ({ id: t.match.id, amount: { value: t.amount } })));
+    const failed = [];
+    results.forEach((r, i) => {
+      const t = batch[i];
+      if (!r.success) return failed.push(r.error);
+      t.match = { ...t.match, type: t.amount < 0 ? 'expense' : 'income' };
+      t.typeMismatch = false;
+      const same = (t.match.texts || [t.match.desc]).some((x) => sameDescription(x, t.desc));
+      Object.assign(t, same ? { done: true, likely: false } : { likely: true }, { selected: false });
+    });
+    render();
+    if (failed.length) setStatus(`Fixed ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
+    else setStatus(demo ? `Demo: pretended to fix ${batch.length}. Nothing was sent.` : `Fixed ${batch.length} in Wallet.`);
+    if (!demo && failed.length < batch.length) refreshAccounts(true); // the balance changes when a sign flips
+  } catch (e) { setStatus(e.message, 'error'); }
+  finally { setBusy(false); }
+}
+
+$('fixAll').onclick = () => fixType(txs.filter(canFix), $('fixAll'));
 
 function updateCount() {
   const likely = txs.filter((t) => t.likely && !t.typeMismatch).length;
   $('replaceAll').hidden = !likely;
   $('replaceAll').textContent = `Replace ${likely} likely`;
+  const fixable = txs.filter(canFix).length;
+  $('fixAll').hidden = fixable < 2; // one is fixed from its own row; the bulk button is for several
+  $('fixAll').textContent = `Fix ${fixable} types`;
   const n = selected().length;
   $('count').textContent = `${n} selected`;
   $('sync').textContent = n ? `Add ${n} to Wallet` : 'Add to Wallet';
@@ -552,15 +626,18 @@ $('clear').onclick = () => {
 
 // Shows how each side was parsed (local only), to see why a transaction didn't match its Wallet record.
 $('compare').onclick = async () => {
+  if (busy) return;
   // Also report how the real page marks amounts and accounts (digits masked), to debug. Skipped for demo data.
   let pageInfo = [];
   if (!demo) {
+    setBusy(true, { button: $('compare'), label: 'Comparing…' });
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const diag = await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, func: diagnosePage });
       pageInfo = diag.map((f) => f.result).filter((r) => r?.amountCells?.length)
         .map((r) => JSON.stringify({ amountCells: r.amountCells, amountShapes: r.amountShapes }, null, 2));
     } catch (e) { /* the comparison below is still useful */ }
+    finally { setBusy(false); }
   }
   const mask = (s) => (s || '').replace(/\d/g, '9');
   const rows = (list) => list.map((x) => `${x.date}  ${x.amount}  ${x.type || '-'}  ${x.desc}` + (x.source ? `  [${x.source}, ${x.state || '?'}, updated ${x.updatedAt || '?'}]` : ''));
@@ -584,9 +661,8 @@ $('preview').onclick = () => {
 
 $('sync').onclick = async () => {
   const batch = selected();
-  if (!batch.length || !accountId) return;
-  $('sync').disabled = true;
-  busy = true;
+  if (!batch.length || !accountId || busy) return;
+  setBusy(true, { button: $('sync'), label: 'Adding…' });
   setStatus(`Adding ${batch.length} to Wallet…`);
   try {
     const results = demo
@@ -609,8 +685,8 @@ $('sync').onclick = async () => {
     if (failed.length) setStatus(`Added ${added}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
     else setStatus(demo ? `Demo: pretended to add ${added}. Nothing was sent.` : `Added ${added} to Wallet. You can undo this for 15 minutes.`);
     if (!demo && added) refreshAccounts(true);
-  } catch (e) { setStatus(e.message, 'error'); updateCount(); }
-  finally { busy = false; }
+  } catch (e) { setStatus(e.message, 'error'); }
+  finally { setBusy(false); }
 };
 
 // The Undo button shows for 15 minutes after an add. It deletes exactly the records that add created (and the mirror
@@ -623,9 +699,9 @@ function showUndo() {
 }
 
 $('undo').onclick = async () => {
-  if (!lastAdd) return;
+  if (!lastAdd || busy) return;
   const { groups, demo: wasDemo } = lastAdd;
-  busy = true;
+  setBusy(true, { button: $('undo'), label: 'Undoing…' });
   setStatus('Removing what was just added…');
   try {
     const out = wasDemo ? { deleted: groups.length, failed: [] } : await deleteRecords(settings.token, groups);
@@ -638,9 +714,9 @@ $('undo').onclick = async () => {
       if (wasDemo) txs.forEach((t) => { if (t.done && !t.match) { t.done = false; t.selected = true; } });
     }
     showUndo();
-    if (!wasDemo) { await refreshAccounts(true); busy = false; await reanalyse(); } else render();
+    if (!wasDemo) { await refreshAccounts(true); setBusy(false); await reanalyse(); } else render();
   } catch (e) { setStatus(e.message, 'error'); }
-  finally { busy = false; }
+  finally { setBusy(false); }
 };
 
 init();

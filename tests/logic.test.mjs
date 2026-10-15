@@ -12,6 +12,10 @@ const { isSupportedUrl, SUPPORTED_BANKS } = await load('sites.js');
 check('sameDescription ignores case and punctuation', wallet.sameDescription('Gather Cafe, KL', 'GATHER CAFE KL'));
 check('sameDescription accepts a long truncated prefix', wallet.sameDescription('PETRONAS SETIA ALAM SELANGOR MY', 'PETRONAS SETIA ALAM'));
 check('sameDescription rejects short prefixes', !wallet.sameDescription('TNG', 'TNG EWALLET RELOAD'));
+check('sameDescription: a note that adds details after the description', wallet.sameDescription('GKS*GATHER CAFE SDN. KUCHING MY - lunch with team', 'GKS*GATHER CAFE SDN. KUCHING MY'));
+check('sameDescription: a note that adds details before the description', wallet.sameDescription('Groceries: TESCO EXTRA CHERAS (weekly)', 'TESCO EXTRA CHERAS'));
+check('sameDescription: a short bank description is not found inside any note', !wallet.sameDescription('Topped up TNG for parking', 'TNG'));
+check('sameDescription: part of the bank description inside a note is not enough', !wallet.sameDescription('Lunch at EXTRA CHERAS food court', 'TESCO EXTRA CHERAS'));
 const rules = [
   { keywords: ['star'], category: { id: 'x', name: 'Other' } },
   { keywords: ['starbucks'], category: { id: 'food', name: 'Food' } },

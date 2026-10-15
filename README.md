@@ -40,11 +40,11 @@ Besides the token, default account and currency, the Settings page (the cog) has
 - **Remembered choices**: forget the categories you picked by hand, or the rows you chose not to sync.
 
 ## How duplicates are avoided
-Nothing is written into Wallet to track what was synced. Before showing the list, the extension fetches the account's existing records for the date range and pairs each bank row with one record (matching on date, amount and description, ignoring case, spacing and punctuation, and allowing for Wallet cutting descriptions short). Two identical coffees on the same day need two Wallet records.
+Nothing is written into Wallet to track what was synced. Before showing the list, the extension fetches the account's existing records for the date range and pairs each bank row with one record (matching on date, amount and description, ignoring case, spacing and punctuation, allowing for Wallet cutting descriptions short, and accepting a note that contains the whole bank description with your own details added before or after it). Two identical coffees on the same day need two Wallet records.
 
 - **In Wallet:** same date, amount, type and description.
 - **Likely in Wallet:** same date and amount, different description. Unticked, with the Wallet description shown. **Replace** sets that record's note to the bank's description; payer, category and labels are never touched.
-- **Type differs:** same date and amount but the opposite type (an expense recorded as income). It is flagged rather than counted as "In Wallet", because the record needs fixing in Wallet.
+- **Type differs:** same date and amount but the opposite type (an expense recorded as income). It is flagged rather than counted as "In Wallet". **Fix in Wallet** sets that record's amount to the bank's sign (category, note and labels are kept); **Fix N types** does several at once. A transfer has to be fixed in Wallet itself, since changing one side would break the pair.
 
 Records synced by older versions carry a `[m2u:…]` tag in their note. It's ignored when reading and no longer written.
 

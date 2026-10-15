@@ -21,7 +21,7 @@ You log in to your bank as usual. Open the extension and it reads the transactio
 
 FEATURES
 • Reads the transaction table on the Maybank2u page you are viewing, automatically when you open the panel and again when you change pages (switch it off in Settings). No bank login is ever handled by the extension.
-• Duplicate detection: compares date, amount, type and description against your existing Wallet records, so re-running it never double-adds. A record with the wrong type (an expense saved as income) is flagged, not hidden.
+• Duplicate detection: compares date, amount, type and description against your existing Wallet records, so re-running it never double-adds. A record with the wrong type (an expense saved as income) is flagged, not hidden, with a one-click fix. Notes you've added details to still count as matches.
 • Picks the right Wallet account for the bank account you're looking at, and remembers it.
 • Fills in categories and labels from your own Wallet rules, the categories you've chosen before, and similar past records. Change any row's category before adding.
 • Turns card repayments and similar rows into proper Wallet transfers, using rules you set.

@@ -70,7 +70,7 @@ const settingsBand = await (async () => {
 
 const shots = {
   'screenshot-1-review.png': slide('Review before you sync', 'Read the transactions on your bank page, then tick exactly what you want in Wallet.', b64(topOfPanel), { cardWidth: 400 }),
-  'screenshot-2-duplicates.png': slide('No more double entries', 'Compares date, amount and description with your Wallet records. Likely matches stay unticked, and a record with the wrong type is flagged instead of hidden.', b64(await band('MCDONALDS', 'XCORE')), { cardWidth: 380 }),
+  'screenshot-2-duplicates.png': slide('No more double entries', 'Compares date, amount and description with your Wallet records. Likely matches stay unticked, and a record saved with the wrong type is flagged, with a one-click fix.', b64(await band('MCDONALDS', 'XCORE')), { cardWidth: 380 }),
   'screenshot-3-settings.png': slide('Make it yours', 'Pick the Wallet account per bank account, set transfer rules, and choose how the panel behaves. Everything stays in your browser.', b64(settingsBand), { cardWidth: 500 }),
 };
 for (const [file, html] of Object.entries(shots)) {

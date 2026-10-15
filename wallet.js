@@ -96,13 +96,16 @@ function recordTexts(r) {
     .map((v) => (typeof v === 'string' ? v : v?.name || '').replace(LEGACY_TAG_RE, '').trim()).filter(Boolean))];
 }
 
-// Ignores case, spacing and punctuation. Wallet sometimes cuts descriptions short, so a long enough prefix counts too.
-export function sameDescription(a, b) {
+// Whether a Wallet text (note, payer, …) describes the same transaction as the bank's description. Ignores case,
+// spacing and punctuation, and accepts (with at least 8 letters/digits, so "TNG" can't match everything):
+//   - a cut-off start of either one (Wallet sometimes shortens descriptions), and
+//   - a note that contains the whole bank description, anywhere: people add details ("Lunch: GKS*GATHER CAFE …").
+export function sameDescription(walletText, bankDesc) {
   const n = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const [x, y] = [n(a), n(b)];
+  const [x, y] = [n(walletText), n(bankDesc)];
   if (!x || !y) return false;
   const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  return short === long || (short.length >= 8 && long.startsWith(short));
+  return short === long || (short.length >= 8 && long.startsWith(short)) || (y.length >= 8 && x.includes(y));
 }
 
 // The merchant part of a description: its first two words with digits, codes and punctuation dropped, so
@@ -183,6 +186,7 @@ export async function existingRecords(token, accountId, from, to) {
         date: myDate(r.recordDate),
         amount: Math.abs(value),
         type: String(r.recordType || '').toLowerCase() || undefined,
+        transfer: Boolean(r.transfer),
         texts,
         desc: texts.join(' · '),
       });

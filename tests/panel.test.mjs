@@ -215,6 +215,100 @@ const settle = (ms = 700) => wait(ms);
   await page.close();
 }
 
+// ---------------------------------------------------------------- fixing a wrong type; notes with extra details
+{
+  const wrong = (id, date, amount, note, extra = {}) => ({ id, accountId: 'a1', recordDate: `${date}T04:00:00Z`, amount: { value: amount }, recordType: amount < 0 ? 'expense' : 'income', note, ...extra });
+  const { page } = await open({
+    rows: [
+      { date: '2026-10-09', desc: 'XCORE FITNESS-E24 :009/024', amount: -249.96 },
+      { date: '2026-10-08', desc: 'TRIP.COM INTERNET HK', amount: -301.41 },
+      { date: '2026-10-07', desc: 'CARD REPAYMENT', amount: -500 },
+      { date: '2026-10-06', desc: 'GKS*GATHER CAFE SDN. KUCHING MY', amount: -98.05 },
+    ],
+    records: [
+      wrong('r9', '2026-10-09', 249.96, 'XCORE FITNESS-E24 :009/024'), // expense saved as income, same description
+      wrong('r8', '2026-10-08', 301.41, 'Holiday flights'),             // expense saved as income, different description
+      wrong('r7', '2026-10-07', 500, 'CARD REPAYMENT', { transfer: { pairing: 'paired' } }), // a transfer: not fixable here
+      wrong('r6', '2026-10-06', -98.05, 'Team lunch: GKS*GATHER CAFE SDN. KUCHING MY (paid for Ali)'), // note adds details
+    ],
+  });
+  await settle();
+  let r = await rows(page);
+  check('notes with extra details still count as In Wallet', r[3].chips[0] === 'In Wallet', JSON.stringify(r[3]));
+  const fixButtons = await page.evaluate(() => [...document.querySelectorAll('#list li')].map((li) => [...li.querySelectorAll('button')].some((b) => b.textContent === 'Fix in Wallet')));
+  check('fix: offered on wrong-type rows, not on a transfer', JSON.stringify(fixButtons.slice(0, 3)) === JSON.stringify([true, true, false]), JSON.stringify(fixButtons));
+  check('fix: the transfer explains it must be fixed in Wallet', r[2].lines.join(' ').includes("It's a transfer in Wallet"));
+  check('fix: the bulk button appears for several', await visible(page, '#fixAll') && (await text(page, '#fixAll')) === 'Fix 2 types');
+  await page.evaluate(() => [...document.querySelectorAll('#list li')[0].querySelectorAll('button')].find((b) => b.textContent === 'Fix in Wallet').click());
+  await settle();
+  const patched = await log(page, 'patched');
+  check('fix: sends only the amount, with the bank sign', JSON.stringify(patched[0]) === JSON.stringify([{ id: 'r9', amount: { value: -249.96 } }]), JSON.stringify(patched));
+  r = await rows(page);
+  check('fix: the row is then In Wallet', r[0].chips[0] === 'In Wallet', JSON.stringify(r[0]));
+  check('fix: a single remaining wrong type hides the bulk button', !(await visible(page, '#fixAll')));
+  await page.evaluate(() => [...document.querySelectorAll('#list li')[1].querySelectorAll('button')].find((b) => b.textContent === 'Fix in Wallet').click());
+  await settle();
+  r = await rows(page);
+  check('fix: with a different description it becomes Likely, so Replace is offered', r[1].chips[0] === 'Likely in Wallet' && await page.evaluate(() => [...document.querySelectorAll('#list li')[1].querySelectorAll('button')].some((b) => b.textContent === 'Replace')), JSON.stringify(r[1]));
+  check('fix: the balance is refreshed after a sign change', (await log(page, 'fetches')).filter((f) => f.startsWith('GET /accounts')).length >= 2);
+  await page.close();
+}
+
+// ---------------------------------------------------------------- busy state: progress, spinner, lock, one request
+{
+  const { page } = await open({
+    delay: 600, // the fake Wallet takes 0.6 s per write
+    rows: [{ date: '2026-10-01', desc: 'TESCO EXTRA CHERAS', amount: -10 }, { date: '2026-10-02', desc: 'NEW ONE', amount: -5 }],
+    records: [{ id: 'r1', accountId: 'a1', recordDate: '2026-10-01T04:00:00Z', amount: { value: -10 }, recordType: 'expense', note: 'Lunch' }],
+  });
+  await settle();
+  const state = () => page.evaluate(() => ({
+    bar: !document.getElementById('progress').hidden,
+    locked: document.getElementById('app').inert,
+    pending: [...document.querySelectorAll('button.pending')].map((b) => b.textContent),
+  }));
+  check('busy: idle panel has no progress bar and nothing locked', JSON.stringify(await state()) === JSON.stringify({ bar: false, locked: false, pending: [] }));
+
+  await page.evaluate(() => { const b = [...document.querySelectorAll('#list button')].find((x) => x.textContent === 'Replace'); b.click(); b.click(); });
+  await wait(150);
+  let s = await state();
+  check('replace: progress bar, "Replacing…" with a spinner, panel locked', s.bar && s.locked && s.pending[0] === 'Replacing…', JSON.stringify(s));
+  await page.click('#sync').catch(() => {});
+  await wait(800);
+  check('replace: a double click sends one request, and Add was not pressable meanwhile', (await log(page, 'patched')).length === 1 && (await log(page, 'created')).length === 0);
+  s = await state();
+  check('replace: afterwards the bar is gone and the panel unlocked', !s.bar && !s.locked && !s.pending.length, JSON.stringify(s));
+
+  await page.click('#sync'); await wait(150);
+  s = await state();
+  check('add: "Adding…" with the panel locked', s.pending[0] === 'Adding…' && s.locked, JSON.stringify(s));
+  await wait(800);
+  check('add: afterwards the Add label is back and Undo is offered', !(await state()).locked && (await text(page, '#sync')).startsWith('Add') && await visible(page, '#undo'));
+
+  await page.click('#undo'); await wait(150);
+  check('undo: "Undoing…" while it runs', (await state()).pending[0] === 'Undoing…');
+  await wait(1400);
+  s = await state();
+  check('undo: finishes and unlocks', !s.locked && !s.bar && (await log(page, 'deleted')).length === 1, JSON.stringify(s));
+  await page.close();
+}
+{
+  const { page } = await open({ delay: 600, rows: [{ date: '2026-10-02', desc: 'NEW ONE', amount: -5 }] });
+  await settle();
+  await page.click('#sync'); await wait(100);
+  await page.evaluate(() => { window.__t.env.rows = [{ date: '2026-10-03', desc: 'ARRIVED DURING ADD', amount: -7 }]; window.__fire('message', { type: 'b2w-page-changed' }); });
+  await wait(1500);
+  check('busy: a page change during an add is read once the add finishes (not dropped)', (await rows(page)).some((r) => r.desc === 'ARRIVED DURING ADD'));
+  // an automatic refresh shows the bar but never locks the panel
+  const during = await page.evaluate(async () => {
+    window.__fire('message', { type: 'b2w-page-changed' });
+    await new Promise((r) => setTimeout(r, 120)); // past the 100 ms debounce, while the read runs
+    return { locked: document.getElementById('app').inert };
+  });
+  check('busy: automatic refreshes never lock the panel', during.locked === false);
+  await page.close();
+}
+
 // ---------------------------------------------------------------- leaving demo mode
 {
   const accountsOf = (page) => page.evaluate(() => [...document.querySelectorAll('#accountSelect option')].map((o) => o.textContent).join('|'));

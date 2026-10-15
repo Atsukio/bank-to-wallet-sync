@@ -79,6 +79,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
       const u = String(url), method = (opts.method || 'GET').toUpperCase();
       t.fetches.push(`${method} ${u.replace('https://rest.budgetbakers.com/wallet/v1/api', '')}`);
       const body = opts.body ? JSON.parse(opts.body) : null;
+      if (method !== 'GET' && t.env.delay) await new Promise((r) => setTimeout(r, t.env.delay)); // slow writes, for the busy-state tests
       if (u.includes('/accounts')) return json({ accounts: t.env.accounts });
       if (u.includes('/record-rules')) return json({ recordRules: t.env.rules });
       if (u.includes('/categories')) return json({ categories: t.env.categories });
