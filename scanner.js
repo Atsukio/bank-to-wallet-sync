@@ -61,6 +61,14 @@ export function watchPage() {
 // short text that names an account type and the first that holds a (partly masked) number. It never reads amounts.
 export function detectAccount() {
   const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  // Some banks tag the account picker's options with the account's name and number (CIMB Clicks: data-label,
+  // data-account-no). That is exact, so use it first.
+  const tagged = document.querySelector('option[data-account-no]:checked') || document.querySelector('[data-account-no]');
+  if (tagged) {
+    const digits = (tagged.getAttribute('data-account-no') || '').replace(/\D/g, '').slice(-4);
+    const label = clean(tagged.getAttribute('data-label') || '').slice(0, 90);
+    if (digits || label) return { label, digits };
+  }
   const TYPE = /account|card|savings|current|credit|visa|master|amex|akaun|kad/i;
   const NOISE = /transaction history|all transaction|statement|recent|search|filter|date|amount|description/i;
   const NUM = /(?:\d{4}[\s-]+){2,3}\d{2,4}|(?:[xX*\u2022\u25CF]{2,}[\s-]*)+\d{3,4}|\b\d{10,16}\b/;
@@ -75,6 +83,38 @@ export function detectAccount() {
     if (label && digits) break;
   }
   return label || digits ? { label, digits } : null;
+}
+
+// The account balance the page shows, as { label, amount } or null: the first of "Outstanding Balance",
+// "Current/Ledger Balance", "Available Balance", "Statement Balance" (and Malay equivalents) with an amount right after its label.
+// The amount is as shown (a card's outstanding balance is positive); the panel decides whether it is owed.
+export function readBalance() {
+  const clean = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  // Outstanding first: on a card or loan it is what you owe today (a deposit page doesn't show one). A statement
+  // balance is only what was owed on the last statement date, so it comes last.
+  const LABELS = [
+    /^(current )?outstanding balance$|^baki tertunggak$/i,
+    /^(current|ledger) balance$|^baki semasa$/i,
+    /^available balance$|^baki (tersedia|boleh guna)$/i,
+    /^statement balance$|^baki penyata$/i,
+  ];
+  const MONEY = /^\s*(-)?\s*(?:MYR|RM)?\s*(-)?\s*(\d{1,3}(?:,\d{3})+|\d+)\s*\.\s*(\d{2})/i;
+  const labels = [...document.querySelectorAll('label, span, div, p, dt, th, td, strong, h5, h6')]
+    .filter((el) => !el.children.length && clean(el.textContent).length < 40);
+  for (const re of LABELS) {
+    for (const el of labels) {
+      const name = clean(el.textContent);
+      if (!re.test(name)) continue;
+      // the amount is in the label's container, just after the label (Maybank2u cards: 4 levels up, in a sibling .well)
+      for (let box = el.parentElement, up = 0; box && up < 5; box = box.parentElement, up++) {
+        const text = clean(box.innerText || box.textContent);
+        const at = text.indexOf(name);
+        const m = at >= 0 && text.slice(at + name.length).match(MONEY);
+        if (m) return { label: name, amount: (m[1] || m[2] ? -1 : 1) * parseFloat(`${m[3].replace(/,/g, '')}.${m[4]}`) };
+      }
+    }
+  }
+  return null;
 }
 
 export function scanPage() {
@@ -112,7 +152,7 @@ export function scanPage() {
   const ROLES = [
     ['date', /date|tarikh/i],
     ['debit', /debit|withdraw|money out|pengeluaran/i],
-    ['credit', /credit|deposit|money in/i],
+    ['credit', /credit|deposit|money in|simpanan|kredit/i],
     ['amount', /amount|amaun|jumlah/i],
     ['balance', /balance|baki/i],
     ['desc', /desc|transaction|details|particular|keterangan|butiran/i],
@@ -121,11 +161,45 @@ export function scanPage() {
   function mapHeader(cells) {
     const map = {};
     cells.forEach((text, i) => {
+      // One column headed "Debit/Credit" (or "Withdrawal / Deposit") holds signed amounts, not only debits.
+      const both = ROLES[1][1].test(text) && ROLES[2][1].test(text);
+      if (both && map.amount === undefined) { map.amount = i; return; }
       for (const [role, re] of ROLES) {
         if (re.test(text) && map[role] === undefined) { map[role] = i; break; }
       }
     });
     return map;
+  }
+
+  // A description cell, line by line. Banks put details on several lines (CIMB: type, reference, payee, purpose) and
+  // sometimes keep a hidden second copy of them ("show more"). This reads the text of each block once, skips anything
+  // hidden, and works even when the whole table is hidden by a narrow (mobile) layout, where innerText would run the
+  // lines together and include the hidden copy. Lines that are only numbers (account and reference numbers) are dropped.
+  function describe(el, fallback) {
+    if (!el) return clean(fallback);
+    const hidden = (node) => {
+      for (let a = node.parentElement; a && a !== el.parentElement; a = a.parentElement) if (getComputedStyle(a).display === 'none') return true;
+      return false;
+    };
+    const blockOf = (node) => {
+      for (let a = node.parentElement; a && a !== el; a = a.parentElement) {
+        const d = getComputedStyle(a).display;
+        if (!d.startsWith('inline') && d !== 'contents') return a;
+      }
+      return el;
+    };
+    const lines = [];
+    let lastBlock = null;
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      const text = clean(n.textContent);
+      if (!text || hidden(n)) continue;
+      const block = blockOf(n);
+      if (block === lastBlock && lines.length) lines[lines.length - 1] += ' ' + text;
+      else { lines.push(text); lastBlock = block; }
+    }
+    const kept = lines.filter((l) => !/^[\d\s-]{6,}$/.test(l));
+    return (kept.length ? kept : lines).join(' · ') || clean(fallback);
   }
 
   // A row of cell texts that also remembers the cell elements (cells.els), for reading signs the text doesn't carry.
@@ -224,7 +298,7 @@ export function scanPage() {
       if (amount === null && map.amount !== undefined) amount = signedAmount(cells[map.amount], cells.els?.[map.amount]);
       if (amount === null || amount === 0) continue;
       const desc = map.desc !== undefined
-        ? cells[map.desc]
+        ? describe(cells.els?.[map.desc], cells[map.desc])
         : cells.filter((_, i) => !mapped.has(i)).join(' ');
       const bal = map.balance !== undefined ? parseAmount(cells[map.balance]) : null;
       found.push({ date, desc: clean(desc) || '(no description)', amount: Math.round(amount * 100) / 100, bal });

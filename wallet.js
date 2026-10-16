@@ -105,15 +105,36 @@ export function sameDescription(walletText, bankDesc) {
   const [x, y] = [n(walletText), n(bankDesc)];
   if (!x || !y) return false;
   const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  return short === long || (short.length >= 8 && long.startsWith(short)) || (y.length >= 8 && x.includes(y));
+  if (short === long || (short.length >= 8 && long.startsWith(short)) || (y.length >= 8 && x.includes(y))) return true;
+  // A note merged by this extension ("<your note> · <bank description>") matches on its own part, even a short one.
+  return String(walletText).split(' · ').some((part) => n(part) === y);
+}
+
+// "<your note> · <bank description>" within Wallet's 255-character note limit: your part is shortened (with "…") if
+// needed, never the bank's, so the record keeps matching. An empty note just becomes the description.
+export function mergedNote(walletNote, bankDesc) {
+  const note = (walletNote || '').trim(), desc = (bankDesc || '').trim().slice(0, 255);
+  if (!note) return desc;
+  if (sameDescription(note, desc)) return note; // already contains it: nothing to add
+  const room = 255 - desc.length - 3;
+  if (room < 4) return desc;
+  return `${note.length > room ? note.slice(0, room - 1).trimEnd() + '…' : note} · ${desc}`;
 }
 
 // The merchant part of a description: its first two words with digits, codes and punctuation dropped, so
 // "AMAZON MKTPL*5998T9QM0 Amzn.com/billUS" and "AMAZON MKTPL*77AB12 Amzn.com/billUS" share "amazon mktpl".
-export const merchantKey = (s) => (s || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2).slice(0, 2).join(' ');
+// Descriptions read line by line are joined with " · " ("DUITNOW TO ACCOUNT · <payee> · Netflix"); their first line is
+// often only the transaction type, so the most specific later line (searching from the end) names the merchant.
+const wordsKey = (s) => (s || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2).slice(0, 2).join(' ');
+const specific = (k) => k.includes(' ') || k.length >= 5;
+export const merchantKey = (s) => {
+  const parts = String(s || '').split(' · ');
+  for (const part of parts.slice(1).reverse()) { const k = wordsKey(part); if (specific(k)) return k; }
+  return wordsKey(parts[0]);
+};
 
 // A merchant key specific enough to learn from or remember (two words, or one long word), else ''.
-export const memoryKey = (s) => { const k = merchantKey(s); return k.includes(' ') || k.length >= 5 ? k : ''; };
+export const memoryKey = (s) => { const k = merchantKey(s); return specific(k) ? k : ''; };
 
 // Categorised records from roughly the last six months (any account), newest first, for guessing the category of a
 // new transaction from what the user already filed under the same merchant. "Unknown" categories teach nothing.
@@ -184,9 +205,11 @@ export async function existingRecords(token, accountId, from, to) {
         state: r.recordState,
         updatedAt: r.updatedAt,
         date: myDate(r.recordDate),
+        recordDate: r.recordDate,
         amount: Math.abs(value),
         type: String(r.recordType || '').toLowerCase() || undefined,
         transfer: Boolean(r.transfer),
+        note: typeof r.note === 'string' ? r.note.replace(LEGACY_TAG_RE, '').trim() : '',
         texts,
         desc: texts.join(' · '),
       });

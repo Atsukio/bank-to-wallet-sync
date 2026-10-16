@@ -5,6 +5,7 @@
 //   'exact'  = entered by hand, same description apart from case and spacing
 //   'cut'    = entered by hand, same description but cut short by Wallet
 //   'wrongtype' = entered with the OPPOSITE type (an expense recorded as income)
+//   'earlier'  = entered a day before the bank posted it (card purchases often post a day later)
 //   absent   = genuinely new
 export const DEMO_TXS = [
   { date: '2026-10-01', desc: 'GRAB* A-4F2K9 KUALA LUMPUR MY', amount: -18.5, wallet: 'same' },
@@ -19,6 +20,7 @@ export const DEMO_TXS = [
   { date: '2026-10-08', desc: 'SHOPEE MALAYSIA ORDER 88231', amount: -64.9, wallet: 'same' },
   { date: '2026-10-09', desc: 'PETRONAS SETIA ALAM SELANGOR MY', amount: -70, wallet: 'cut' },
   { date: '2026-10-09', desc: 'XCORE FITNESS-E24 :009/024', amount: -249.96, wallet: 'wrongtype' },
+  { date: '2026-10-08', desc: 'BOOST JUICE AEON KUCHING MY', amount: -19.5, wallet: 'earlier', walletDesc: 'Juice' },
   { date: '2026-10-10', desc: 'SPAYLATER REPAYMENT-EC SPKUALA LUMPUR MY', amount: -3131.27 },
   { date: '2026-10-10', desc: 'NETFLIX.COM', amount: -55 },
 ];
@@ -29,6 +31,9 @@ export const DEMO_ACCOUNTS = [
   { id: 'demo-card', name: 'Maybank Visa Platinum', currencyCode: 'MYR', balance: { currentBalance: -12252.42, currencyCode: 'MYR' } },
   { id: 'demo-cash', name: 'Cash', currencyCode: 'MYR', balance: { currentBalance: 120, currencyCode: 'MYR' } },
 ];
+
+// What the demo "bank page" shows as its balance (a little above the demo Wallet balance, so Adjust has something to do).
+export const DEMO_BANK_BALANCE = { label: 'Current Balance', amount: 3500 };
 
 // Fake category list for the per-row picker, shaped like listCategories().
 export const DEMO_CATEGORIES = [
@@ -72,6 +77,10 @@ export function demoRecords(txs) {
     if (t.wallet === 'manual') recs.push({ ...base, desc: t.walletDesc });
     if (t.wallet === 'exact') recs.push({ ...base, desc: t.desc.replace(/ /g, '  ').toLowerCase() });
     if (t.wallet === 'cut') recs.push({ ...base, desc: t.desc.slice(0, 20) });
+    if (t.wallet === 'earlier') {
+      const d = new Date(Date.parse(`${t.date}T00:00:00Z`) - 864e5).toISOString().slice(0, 10);
+      recs.push({ ...base, date: d, recordDate: `${d}T05:30:00.000Z`, desc: t.walletDesc, note: t.walletDesc });
+    }
     if (t.wallet === 'wrongtype') recs.push({ ...base, type: t.amount < 0 ? 'income' : 'expense', desc: t.desc });
   }
   return [...recs, ...DEMO_OTHER];

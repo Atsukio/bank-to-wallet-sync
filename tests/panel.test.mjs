@@ -118,6 +118,10 @@ const settle = (ms = 700) => wait(ms);
   const r = await rows(page);
   check('transfer: a matching rule marks the row as a transfer', r[0].chips.includes('Transfer') && r[0].lines.join(' ').includes('Credit card'), JSON.stringify(r[0]));
   check('transfer: other rows are ordinary', !r[1].chips.includes('Transfer'));
+  check('transfer: the amount has its own colour', await page.evaluate(() => {
+    const [t, o] = [...document.querySelectorAll('#list .amt')];
+    return t.classList.contains('xfer') && o.classList.contains('neg') && getComputedStyle(t).color !== getComputedStyle(o).color;
+  }));
   await page.click('#preview');
   const payload = JSON.parse(await text(page, '#payload'));
   check('transfer: payload has the paired-transfer block and a negative amount', payload[0].transfer?.accountId === 'a2' && payload[0].transfer.pairingMode === 'new' && payload[0].amount.value === -3131.27);
@@ -157,7 +161,7 @@ const settle = (ms = 700) => wait(ms);
   await settle();
   const r = (await rows(page))[0];
   check('type mismatch: an income record for an expense row is flagged, not "In Wallet"', r.chips[0] === 'Type differs' && !r.chips.includes('In Wallet'), JSON.stringify(r));
-  check('type mismatch: no Replace button (it would not fix the sign)', !(await page.evaluate(() => [...document.querySelectorAll('#list button')].some((b) => b.textContent === 'Replace'))));
+  check('type mismatch: no Replace button (it would not fix the sign)', !(await page.evaluate(() => [...document.querySelectorAll('#list button')].some((b) => b.textContent.startsWith('Replace')))));
   await page.close();
 }
 {
@@ -174,6 +178,23 @@ const settle = (ms = 700) => wait(ms);
   await page.evaluate(() => [...document.querySelectorAll('#list li')[0].querySelectorAll('button')].find((b) => b.textContent === 'Restore').click()); await settle();
   r = await rows(page);
   check('ignore: Restore brings the row back', !r[0].cls.includes('ignored') && (await store(page)).ignored.length === 0);
+  await page.close();
+}
+
+// ---------------------------------------------------------------- infinite scroll (CIMB loads more rows into the same table)
+{
+  const { page } = await open({ tabUrl: 'https://www.cimbclicks.com.my/clicks/#/history', rows: [{ date: '2026-10-07', desc: 'ROW ONE', amount: -10 }, { date: '2026-10-05', desc: 'ROW TWO', amount: -20 }] });
+  await settle();
+  check('CIMB Clicks pages are read', (await rows(page)).length === 2);
+  await page.evaluate(() => document.querySelectorAll('#list li')[0].querySelector('input').click());
+  await page.evaluate(() => {
+    window.__t.env.rows = [...window.__t.env.rows, { date: '2026-09-30', desc: 'LOADED ON SCROLL', amount: -30 }];
+    window.__fire('message', { type: 'b2w-page-changed' });
+  });
+  await settle();
+  const r = await rows(page);
+  check('scrolling loads more: the new rows join the list', r.map((x) => x.desc).join('|') === 'ROW ONE|ROW TWO|LOADED ON SCROLL', JSON.stringify(r.map((x) => x.desc)));
+  check('scrolling loads more: what you unticked stays unticked', r[0].checked === false && r[2].checked === true);
   await page.close();
 }
 
@@ -215,6 +236,114 @@ const settle = (ms = 700) => wait(ms);
   await page.close();
 }
 
+// ---------------------------------------------------------------- Wallet record dated before the bank posted it
+{
+  const rec = (id, recordDate, amount, note) => ({ id, accountId: 'a1', recordDate, amount: { value: amount }, recordType: 'expense', note });
+  const { page } = await open({
+    rows: [{ date: '2026-10-08', desc: 'BOOST JUICE AEON KUCHING MY', amount: -19.5 }, { date: '2026-10-09', desc: 'GRAB RIDE', amount: -12 }],
+    records: [rec('e1', '2026-10-07T05:30:00.000Z', -19.5, 'Juice'), rec('e2', '2026-10-07T01:00:00.000Z', -12, 'GRAB RIDE')],
+  });
+  await settle();
+  const r = await rows(page);
+  check('earlier date: shown as likely and unticked, not as new', r[0].chips[0] === 'Likely in Wallet' && !r[0].checked, JSON.stringify(r[0]));
+  check('earlier date: says when Wallet has it and its note', r[0].lines[0] === 'Wallet has this a day earlier, on 7 Oct: "Juice"', JSON.stringify(r[0].lines));
+  check('earlier date: two days earlier is worded as such', r[1].lines[0].startsWith('Wallet has this 2 days earlier, on 7 Oct'), JSON.stringify(r[1].lines));
+  const buttons = await page.evaluate(() => [...document.querySelectorAll('#list li')[0].querySelectorAll('button')].map((b) => b.textContent));
+  check('earlier date: offers "Use bank date" (note actions come after lining it up)', JSON.stringify(buttons) === JSON.stringify(['Use bank date']), JSON.stringify(buttons));
+  check('nearby date: the Wallet fetch covers 3 days either side of the bank dates', (await log(page, 'fetches')).some((f) => f.includes('recordDate=gte.2026-10-04T16%3A00%3A00.000Z') && f.includes('recordDate=lte.2026-10-12T15%3A59%3A59.000Z')), JSON.stringify((await log(page, 'fetches')).filter((f) => f.includes('/records?'))));
+  check('earlier date: the coverage line counts only the bank\'s dates', (await text(page, '#coverage')).startsWith('Wallet has no records for 8 Oct – 9 Oct'), await text(page, '#coverage'));
+  check('earlier date: bulk button for several', (await text(page, '#moveAll')) === 'Use 2 bank dates');
+  await page.evaluate(() => document.querySelectorAll('#list li')[0].querySelector('button').click()); await settle(400);
+  check('earlier date: moves the record by the lag, keeping its time of day', JSON.stringify((await log(page, 'patched'))[0]) === JSON.stringify([{ id: 'e1', recordDate: '2026-10-08T05:30:00.000Z' }]), JSON.stringify(await log(page, 'patched')));
+  const after = (await rows(page))[0];
+  check('earlier date: afterwards a different description offers Merge / Replace', after.chips[0] === 'Likely in Wallet' && after.lines[0] === 'Wallet note: "Juice"', JSON.stringify(after));
+  await page.click('#moveAll').catch(() => {}); // only one left, so the bulk button is hidden
+  await page.evaluate(() => document.querySelectorAll('#list li')[1].querySelector('button').click()); await settle(400);
+  check('earlier date: with the same description it is then In Wallet', (await rows(page))[1].chips[0] === 'In Wallet');
+  await page.close();
+}
+
+// ---------------------------------------------------------------- balance check and adjustment
+{
+  const { page } = await open({ bankBalance: { label: "Current Balance", amount: 1000 } });
+  await settle();
+  check("balance check: shows the bank balance and the difference", (await text(page, "#reconcileText")).replace(/ /g, " ") === "Bank current balance: RM 1,000.00 · Wallet is RM 234.50 higher", await text(page, "#reconcileText"));
+  check("balance check: offers Adjust", await visible(page, "#adjust"));
+  await page.click("#adjust");
+  const ask = await text(page, "#adjustText");
+  check("adjust: asks first, with the amount and a warning about rows not yet added", ask.startsWith("Add a -RM 234.50 balance adjustment to Savings") && ask.includes("1 new transaction on this page isn't in Wallet yet"), ask);
+  check("adjust: nothing is written before confirming", (await log(page, "created")).length === 0);
+  await page.evaluate(() => { window.__t.env.accounts = window.__t.env.accounts.map((a) => (a.id === "a1" ? { ...a, balance: { ...a.balance, currentBalance: 1000 } } : a)); });
+  await page.click("#adjustYes"); await settle();
+  const [made] = await log(page, "created");
+  check("adjust: one record for the difference, reconciled, with a clear note", made?.amount.value === -234.5 && made.recordState === "reconciled" && made.note.startsWith("Balance adjustment to match the bank's current balance") && made.accountId === "a1", JSON.stringify(made));
+  check("adjust: it can be undone like any add", await visible(page, "#undo") && JSON.stringify((await store(page)).lastAdd?.groups) === JSON.stringify([["new-1"]]));
+  check("adjust: afterwards the balances match", (await text(page, "#reconcileText")).endsWith("matches Wallet ✓") && !(await visible(page, "#adjust")), await text(page, "#reconcileText"));
+  await page.close();
+}
+{
+  const env = { ...baseEnv(), bankBalance: { label: "Outstanding Balance", amount: 500 }, bank: { label: "Card", digits: "1111" } };
+  env.accounts = env.accounts.map((a) => (a.id === "a2" ? { ...a, accountType: "CreditCard" } : a));
+  env.settings = { ...env.settings, accountMap: { "d:1111": "a2" } };
+  const page = await newPanel(browser, server, env);
+  await settle();
+  check("balance check: a card's outstanding balance is owed, so it matches Wallet's negative balance", (await text(page, "#reconcileText")).replace(/ /g, " ") === "Bank outstanding balance: RM 500.00 owed · matches Wallet ✓", await text(page, "#reconcileText"));
+  await page.close();
+}
+{
+  const { page } = await open({});
+  await settle();
+  check("balance check: hidden when the page shows no balance", !(await visible(page, "#reconcile")));
+  await page.close();
+}
+
+// ---------------------------------------------------------------- automated Wallet record dated after the bank
+{
+  const { page } = await open({
+    rows: [{ date: "2026-10-05", desc: "TR IBG · PayNet Direct Debit · EXAMPLE ASSET MGMT", amount: -300 }],
+    records: [{ id: "s1", accountId: "a1", recordDate: "2026-10-07T01:00:00.000Z", amount: { value: -300 }, recordType: "expense", note: "Monthly investment" }],
+  });
+  await settle();
+  const r = (await rows(page))[0];
+  check("later date: an automated record 2 days after the bank is offered, not treated as new", r.chips[0] === "Likely in Wallet" && !r.checked, JSON.stringify(r));
+  check("later date: worded as later", r.lines[0] === "Wallet has this 2 days later, on 7 Oct: \"Monthly investment\"", JSON.stringify(r.lines));
+  await page.evaluate(() => document.querySelector("#list li button").click()); await settle(400);
+  check("later date: Use bank date moves it back to the bank's day, same time", JSON.stringify((await log(page, "patched"))[0]) === JSON.stringify([{ id: "s1", recordDate: "2026-10-05T01:00:00.000Z" }]), JSON.stringify(await log(page, "patched")));
+  await page.close();
+}
+
+// ---------------------------------------------------------------- merging notes
+{
+  const rec = (id, date, amount, note) => ({ id, accountId: 'a1', recordDate: `${date}T04:00:00Z`, amount: { value: amount }, recordType: 'expense', note });
+  const { page } = await open({
+    rows: [
+      { date: '2026-10-02', desc: 'MCDONALDS PAVILION KL', amount: -23.9 },
+      { date: '2026-10-04', desc: 'TNG', amount: -50 },
+      { date: '2026-10-05', desc: 'SHELL SETIA ALAM', amount: -80 },
+    ],
+    records: [rec('m1', '2026-10-02', -23.9, 'Lunch'), rec('m2', '2026-10-04', -50, 'Parking'), rec('m3', '2026-10-05', -80, 'Fuel')],
+  });
+  await settle();
+  const buttonsOf = (i) => page.evaluate((n) => [...document.querySelectorAll('#list li')[n].querySelectorAll('button')].map((b) => b.textContent), i);
+  check('merge: likely rows offer Merge notes next to Replace note', JSON.stringify(await buttonsOf(0)) === JSON.stringify(['Merge notes', 'Replace note']), JSON.stringify(await buttonsOf(0)));
+  check('merge: the row says what the Wallet note is', (await rows(page))[0].lines[0] === 'Wallet note: "Lunch"', JSON.stringify((await rows(page))[0].lines));
+  check('merge: hovering shows the note you will get', await page.evaluate(() => [...document.querySelectorAll('#list li')[0].querySelectorAll('button')].map((b) => b.title).join('|')) === 'Wallet note becomes: "Lunch · MCDONALDS PAVILION KL". Amount, payer, category and labels are kept.|Wallet note becomes: "MCDONALDS PAVILION KL". Amount, payer, category and labels are kept.');
+  check('merge: the bulk buttons count notes', (await text(page, '#mergeAll')) === 'Merge 3 notes' && (await text(page, '#replaceAll')) === 'Replace 3 notes');
+  await page.evaluate(() => document.querySelectorAll('#list li')[0].querySelector('button').click()); await settle(400);
+  check('merge: keeps your note and adds the description', JSON.stringify((await log(page, 'patched'))[0]) === JSON.stringify([{ id: 'm1', note: 'Lunch · MCDONALDS PAVILION KL' }]), JSON.stringify(await log(page, 'patched')));
+  check('merge: the row is then In Wallet', (await rows(page))[0].chips[0] === 'In Wallet');
+  await page.click('#mergeAll'); await settle(400);
+  check('merge: the bulk button merges the rest in one request', JSON.stringify((await log(page, 'patched'))[1]) === JSON.stringify([{ id: 'm2', note: 'Parking · TNG' }, { id: 'm3', note: 'Fuel · SHELL SETIA ALAM' }]), JSON.stringify((await log(page, 'patched'))[1]));
+  // after Wallet syncs, a re-read sees the merged notes as matches, even the short "TNG"
+  await page.evaluate(() => {
+    window.__t.env.records = window.__t.env.records.map((r) => ({ ...r, note: { m1: 'Lunch · MCDONALDS PAVILION KL', m2: 'Parking · TNG', m3: 'Fuel · SHELL SETIA ALAM' }[r.id] }));
+    window.__fire('activated', {});
+  });
+  await settle();
+  check('merge: merged notes count as In Wallet on the next read', (await rows(page)).every((r) => r.chips[0] === 'In Wallet'), JSON.stringify((await rows(page)).map((r) => r.chips)));
+  await page.close();
+}
+
 // ---------------------------------------------------------------- fixing a wrong type; notes with extra details
 {
   const wrong = (id, date, amount, note, extra = {}) => ({ id, accountId: 'a1', recordDate: `${date}T04:00:00Z`, amount: { value: amount }, recordType: amount < 0 ? 'expense' : 'income', note, ...extra });
@@ -249,7 +378,7 @@ const settle = (ms = 700) => wait(ms);
   await page.evaluate(() => [...document.querySelectorAll('#list li')[1].querySelectorAll('button')].find((b) => b.textContent === 'Fix in Wallet').click());
   await settle();
   r = await rows(page);
-  check('fix: with a different description it becomes Likely, so Replace is offered', r[1].chips[0] === 'Likely in Wallet' && await page.evaluate(() => [...document.querySelectorAll('#list li')[1].querySelectorAll('button')].some((b) => b.textContent === 'Replace')), JSON.stringify(r[1]));
+  check('fix: with a different description it becomes Likely, so Replace is offered', r[1].chips[0] === 'Likely in Wallet' && await page.evaluate(() => [...document.querySelectorAll('#list li')[1].querySelectorAll('button')].some((b) => b.textContent === 'Replace note')), JSON.stringify(r[1]));
   check('fix: the balance is refreshed after a sign change', (await log(page, 'fetches')).filter((f) => f.startsWith('GET /accounts')).length >= 2);
   await page.close();
 }
@@ -269,7 +398,7 @@ const settle = (ms = 700) => wait(ms);
   }));
   check('busy: idle panel has no progress bar and nothing locked', JSON.stringify(await state()) === JSON.stringify({ bar: false, locked: false, pending: [] }));
 
-  await page.evaluate(() => { const b = [...document.querySelectorAll('#list button')].find((x) => x.textContent === 'Replace'); b.click(); b.click(); });
+  await page.evaluate(() => { const b = [...document.querySelectorAll('#list button')].find((x) => x.textContent === 'Replace note'); b.click(); b.click(); });
   await wait(150);
   let s = await state();
   check('replace: progress bar, "Replacing…" with a spinner, panel locked', s.bar && s.locked && s.pending[0] === 'Replacing…', JSON.stringify(s));

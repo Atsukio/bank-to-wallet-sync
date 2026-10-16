@@ -16,6 +16,12 @@
   select.acct { width: 100%; padding: 6px 10px; font-weight: 500; letter-spacing: .1px; border: 1px solid var(--md-outline); border-radius: 8px; background-color: var(--md-surface); color: var(--md-on-surface); }
   #bank { font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #balance { font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-secondary); font-weight: 500; }
+  .reconcile { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); }
+  .reconcile.off span { color: var(--warn); }
+  .reconcile button { flex: none; }
+  .adjust-confirm { margin: 6px 0; padding: 10px 12px; border-radius: 12px; background: var(--md-surface-container-high); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
+  .adjust-confirm p { margin: 0 0 8px; }
+  .adjust-actions { display: flex; gap: 8px; }
   .date { color: var(--md-secondary); }
   .cat { color: var(--md-tertiary); }
   .unsure { color: var(--md-error); }
@@ -32,6 +38,7 @@
   li.likely .desc, li.likely .date { opacity: .7; }
   .match { grid-column: 2 / -1; font-size: 14px; line-height: 20px; letter-spacing: .25px; margin-top: -4px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .match span { overflow-wrap: anywhere; }
+  .match > span:first-child { flex: 1; } /* the text takes the room, so several buttons sit together on the right */
   .match button { padding: 2px 12px; font-size: 13px; flex: none; }
   .acts { grid-column: 2 / -1; display: flex; gap: 4px; margin: -2px 0 0 -8px; }
   button.text { border: none; padding: 2px 8px; font-size: 13px; border-radius: 16px; }
@@ -40,6 +47,7 @@
   .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .amt { font-variant-numeric: tabular-nums; text-align: right; }
   .amt.neg { color: var(--md-error); } .amt.pos { color: var(--credit); }
+  .amt.xfer { color: var(--md-tertiary); } /* a transfer is neither spending nor income */
   .bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
   pre { max-height: 220px; overflow: auto; font-size: 13px; background: var(--md-surface-container-high); padding: 12px; border-radius: 12px; }
   /* busy state (see setBusy in popup.js): an M3 indeterminate linear progress bar, a spinner on the pressed button,
@@ -69,6 +77,14 @@
     <p id="account">No account set</p>
     <p id="bank" hidden></p>
     <p id="balance" hidden></p>
+    <div class="reconcile" id="reconcile" hidden>
+      <span id="reconcileText"></span>
+      <button id="adjust" class="text" title="Add one record for the difference so Wallet's balance matches the bank's">Adjust</button>
+    </div>
+    <div class="adjust-confirm" id="adjustConfirm" hidden>
+      <p id="adjustText"></p>
+      <div class="adjust-actions"><button class="primary" id="adjustYes">Add adjustment</button><button id="adjustNo">Cancel</button></div>
+    </div>
   </div>
 
   <div class="actions"><button class="primary grow" id="read">Read transactions on this page</button><button id="demo" title="Dummy transactions, no login or Wallet token needed">Demo data</button></div>
@@ -78,7 +94,7 @@
     <p class="muted" id="coverage"></p>
     <div class="bar">
       <label><input type="checkbox" id="toggleAll" checked> <span id="count"></span></label>
-      <span><button id="fixAll" hidden title="Correct the type of every Wallet record that is recorded with the opposite type">Fix types</button> <button id="replaceAll" hidden title="Update the description of every 'likely' Wallet record to the bank's">Replace</button> <button id="clear" hidden title="Forget the pages collected so far">Clear list</button> <button id="compare" title="Show how Wallet's records and the bank's were read">Compare</button> <button id="preview">Preview payload</button></span>
+      <span><button id="moveAll" hidden title="Move every Wallet record dated a few days before or after the bank to the bank's date">Use bank dates</button> <button id="fixAll" hidden title="Correct the type of every Wallet record that is recorded with the opposite type">Fix types</button> <button id="mergeAll" hidden title="On every likely match: keep the Wallet note and add the bank's description to it">Merge notes</button> <button id="replaceAll" hidden title="On every likely match: replace the Wallet note with the bank's description">Replace notes</button> <button id="clear" hidden title="Forget the pages collected so far">Clear list</button> <button id="compare" title="Show how Wallet's records and the bank's were read">Compare</button> <button id="preview">Preview payload</button></span>
     </div>
     <ul id="list"></ul>
     <div class="actions"><button class="primary grow" id="sync">Add to Wallet</button></div>

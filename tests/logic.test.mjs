@@ -15,6 +15,14 @@ check('sameDescription rejects short prefixes', !wallet.sameDescription('TNG', '
 check('sameDescription: a note that adds details after the description', wallet.sameDescription('GKS*GATHER CAFE SDN. KUCHING MY - lunch with team', 'GKS*GATHER CAFE SDN. KUCHING MY'));
 check('sameDescription: a note that adds details before the description', wallet.sameDescription('Groceries: TESCO EXTRA CHERAS (weekly)', 'TESCO EXTRA CHERAS'));
 check('sameDescription: a short bank description is not found inside any note', !wallet.sameDescription('Topped up TNG for parking', 'TNG'));
+check('mergedNote: your note first, then the bank description', wallet.mergedNote('Lunch', 'MCDONALDS PAVILION KL') === 'Lunch · MCDONALDS PAVILION KL');
+check('mergedNote: an empty note becomes the description', wallet.mergedNote('', 'TNG EWALLET RELOAD') === 'TNG EWALLET RELOAD');
+check('mergedNote: a note that already holds the description is left as it is', wallet.mergedNote('Weekly: TESCO EXTRA CHERAS', 'TESCO EXTRA CHERAS') === 'Weekly: TESCO EXTRA CHERAS');
+{
+  const merged = wallet.mergedNote('x'.repeat(300), 'TESCO EXTRA CHERAS');
+  check('mergedNote: fits 255 characters by shortening your part, never the bank\'s', merged.length <= 255 && merged.endsWith('… · TESCO EXTRA CHERAS'), `${merged.length}`);
+}
+check('sameDescription: a merged note matches even a short description', wallet.sameDescription('Parking · TNG', 'TNG') && !wallet.sameDescription('Parking TNG', 'TNG'));
 check('sameDescription: part of the bank description inside a note is not enough', !wallet.sameDescription('Lunch at EXTRA CHERAS food court', 'TESCO EXTRA CHERAS'));
 const rules = [
   { keywords: ['star'], category: { id: 'x', name: 'Other' } },
@@ -47,6 +55,11 @@ check('guess: "Unknown" categories are never learned', guess('NAENKA NAENKA.COM 
 check('guess: void records are ignored', guess('VOID SHOP', -5) === null);
 check('guess: income and expense histories are separate', guess('SALARY ACME', 4200) === 'Income' && guess('SALARY ACME', -50) === 'Shopping');
 check('guess: unseen merchant gives nothing', guess('TOTALLY NEW PLACE', -9) === null);
+check('memoryKey: multi-line details use the most specific later line, not the transaction type',
+  wallet.memoryKey('DUITNOW TO ACCOUNT · TEST PAYEE · Netflix') === 'netflix'
+  && wallet.memoryKey('TR IBG · PayNet Direct Debit · EXAMPLE ASSET MGMT') === 'example asset'
+  && wallet.memoryKey('I-PAYMENT · FPXPAY EXAMPLE FUNDS BERHAD') === 'fpxpay example');
+check('memoryKey: a trailing amount line falls back to the first line', wallet.memoryKey('NAENKA NAENKA.COM GB · - US$ 57.24') === 'naenka naenka');
 check('memoryKey needs a specific merchant', wallet.memoryKey('TNG') === '' && wallet.memoryKey('AMAZON MKTPL*1') === 'amazon mktpl');
 
 // ---- matchRecords: pairing with Wallet, including the opposite-type case
@@ -67,6 +80,39 @@ const rec = (date, amount, type, desc) => ({ date, amount, type, desc, texts: [d
   const ignored = [tx('2026-10-01', 'A SHOP', -10, { ignored: true })];
   matching.matchRecords(ignored, [rec('2026-10-01', 10, 'expense', 'A SHOP')]);
   check('match: ignored rows take no part', !ignored[0].done && !ignored[0].likely);
+}
+{
+  // records logged a few days before the bank posted the transaction
+  const one = [tx('2026-10-08', 'BOOST JUICE AEON', -19.5)];
+  matching.matchRecords(one, [rec('2026-10-07', 19.5, 'expense', 'Juice')]);
+  check('earlier date: a record a day earlier is likely, with the lag', one[0].likely && one[0].dateLag === 1 && !one[0].done);
+  const claimed = [tx('2026-10-07', 'COFFEE A', -20), tx('2026-10-08', 'COFFEE B', -20)];
+  matching.matchRecords(claimed, [rec('2026-10-07', 20, 'expense', 'Coffee')]);
+  check('earlier date: a bank row on the earlier day keeps its own record', claimed[0].likely && !claimed[0].dateLag && !claimed[1].likely && !claimed[1].done);
+  const far = [tx('2026-10-08', 'X SHOP', -5)];
+  matching.matchRecords(far, [rec('2026-10-04', 5, 'expense', 'X SHOP')]);
+  check(`earlier date: nothing beyond ${matching.MAX_DATE_LAG} days`, !far[0].likely);
+  const wrongType = [tx('2026-10-08', 'X SHOP', -5)];
+  matching.matchRecords(wrongType, [rec('2026-10-07', 5, 'income', 'X SHOP')]);
+  check('earlier date: an opposite-type record a day earlier is not used', !wrongType[0].likely);
+  const prefer = [tx('2026-10-08', 'GRAB RIDE', -12)];
+  const sameDesc = rec('2026-10-06', 12, 'expense', 'GRAB RIDE');
+  matching.matchRecords(prefer, [rec('2026-10-07', 12, 'expense', 'Something else'), sameDesc]);
+  check('earlier date: the same description wins over a closer day', prefer[0].match === sameDesc && prefer[0].dateLag === 2);
+  const later = [tx('2026-10-05', 'TR IBG · PayNet Direct Debit · EXAMPLE ASSET MGMT', -300)];
+  matching.matchRecords(later, [rec('2026-10-07', 300, 'expense', 'Monthly investment')]);
+  check('later date: an automated Wallet record 2 days AFTER the bank matches, with a negative lag', later[0].likely && later[0].dateLag === -2, JSON.stringify(later[0]));
+  const tie = [tx('2026-10-05', 'X SHOP', -5)];
+  const before = rec('2026-10-04', 5, 'expense', 'X SHOP'), after = rec('2026-10-06', 5, 'expense', 'X SHOP');
+  matching.matchRecords(tie, [after, before]);
+  check('nearby date: equally close either side, the earlier one wins', tie[0].match === before && tie[0].dateLag === 1);
+  const real = [tx('2026-10-05', 'INVEST A', -300), tx('2026-10-07', 'INVEST B', -300)];
+  matching.matchRecords(real, [rec('2026-10-07', 300, 'expense', 'Monthly investment')]);
+  check('later date: a bank row really on the later day keeps that record', real[1].likely && !real[1].dateLag && !real[0].likely);
+  const tooLate = [tx('2026-10-05', 'X SHOP', -5)];
+  matching.matchRecords(tooLate, [rec('2026-10-09', 5, 'expense', 'X SHOP')]);
+  check('later date: nothing beyond 3 days', !tooLate[0].likely);
+  check('shiftDate crosses month ends', matching.shiftDate('2026-10-01', -1) === '2026-09-30' && matching.shiftDate('2026-03-01', -3) === '2026-02-26');
 }
 check('signature is stable', matching.signature(tx('2026-10-01', 'X', -1)) === '2026-10-01|X|-1');
 
@@ -113,6 +159,7 @@ check('transfer rule: no keyword, no match', matching.matchTransferRule('NETFLIX
 check('balanceOf reads current balance', wallet.balanceOf({ currencyCode: 'MYR', balance: { currentBalance: -12.5 } })?.value === -12.5);
 check('balanceOf is null without a balance', wallet.balanceOf({ id: 'x' }) === null);
 check('maybank2u pages are supported', isSupportedUrl('https://www.maybank2u.com.my/home/m2u/common/login.do'));
+check('CIMB Clicks pages are supported', isSupportedUrl('https://www.cimbclicks.com.my/clicks/#/') && !isSupportedUrl('https://cimbclicks.com.my.evil.example/'));
 check('look-alike hosts are not', !isSupportedUrl('https://maybank2u.com.my.evil.example/') && !isSupportedUrl('http://www.maybank2u.com.my/') && !isSupportedUrl(undefined));
 check('supported banks list is populated', SUPPORTED_BANKS.length >= 1 && SUPPORTED_BANKS.every((b) => b.name && b.country && b.url instanceof RegExp));
 

@@ -4,18 +4,18 @@
 
 A Chrome/Edge extension. You log in to your bank yourself as usual; the extension only reads the transaction table already on screen and adds new rows to [BudgetBakers Wallet](https://budgetbakers.com) through its official REST API. Nothing goes anywhere else: there is no server, analytics or tracking.
 
-**Supported banks:** Maybank2u (M2U), Malaysia, for now. The list lives in [sites.js](sites.js) and is shown on the Settings page.
+**Supported banks:** Maybank2u (M2U) and CIMB Clicks, Malaysia. The list lives in [sites.js](sites.js) and is shown on the Settings page.
 
 ![Reviewing transactions before syncing](store/screenshot-1-review.png)
 
 ## What it does
-- Reads the transactions on the page, automatically when the panel opens and again when the page changes (you can turn that off).
+- Reads the transactions on the page, automatically when the panel opens and again when the page changes or loads more rows as you scroll (you can turn that off).
 - Compares them with what Wallet already has, so nothing is added twice.
 - Picks the **Wallet account** for the bank account you're looking at, and remembers it.
 - Fills in **categories and labels** from your Wallet rules, your own past choices, and similar past records.
 - Turns card repayments and similar rows into proper Wallet **transfers**.
 - Lets you review, change a category, ignore a row, or flip a sign before anything is written, and **undo** an add for 15 minutes.
-- Shows your Wallet balance and, on the toolbar icon, how many new transactions the page has.
+- Shows your Wallet balance next to the bank's, and **Adjust** adds one (confirmed, undoable) record for any difference. The toolbar icon shows how many new transactions the page has.
 
 ## Install
 1. Open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode**.
@@ -43,7 +43,8 @@ Besides the token, default account and currency, the Settings page (the cog) has
 Nothing is written into Wallet to track what was synced. Before showing the list, the extension fetches the account's existing records for the date range and pairs each bank row with one record (matching on date, amount and description, ignoring case, spacing and punctuation, allowing for Wallet cutting descriptions short, and accepting a note that contains the whole bank description with your own details added before or after it). Two identical coffees on the same day need two Wallet records.
 
 - **In Wallet:** same date, amount, type and description.
-- **Likely in Wallet:** same date and amount, different description. Unticked, with the Wallet description shown. **Replace** sets that record's note to the bank's description; payer, category and labels are never touched.
+- **Likely in Wallet:** same date and amount, different description. Unticked, with the Wallet description shown. **Merge notes** keeps your note and adds the bank's description to it ("Lunch · MCDONALDS PAVILION KL"); **Replace note** swaps your note for the bank's description. Hover either button to see the note you'll get. Either way the record then counts as "In Wallet", and payer, category and labels are never touched. **Merge N notes** / **Replace N notes** do several at once.
+- **Nearby date:** a Wallet record with the same amount and type dated up to 3 days before or after the bank row (card purchases often post a day or two late; automated/scheduled Wallet records can land a day or two after the bank's debit), when no bank row on that other day claims it. Unticked, with the Wallet date and note shown; **Use bank date** moves the record to the bank's date (keeping its time, note, category and labels), and **Use N bank dates** does several.
 - **Type differs:** same date and amount but the opposite type (an expense recorded as income). It is flagged rather than counted as "In Wallet". **Fix in Wallet** sets that record's amount to the bank's sign (category, note and labels are kept); **Fix N types** does several at once. A transfer has to be fixed in Wallet itself, since changing one side would break the pair.
 
 Records synced by older versions carry a `[m2u:…]` tag in their note. It's ignored when reading and no longer written.
@@ -87,4 +88,4 @@ Tests use a stubbed browser and a fake Wallet, never real data or a real token. 
 Listing text, permission justifications and data-usage answers are in [store/LISTING.md](store/LISTING.md), with 1280×800 screenshots and a small promo tile alongside. Bump `version` in `manifest.json`, run `npm run build`, and upload the zip from `dist/`.
 
 ## License
-[MIT](LICENSE). The bundled Roboto font (in [fonts/](fonts/)) is Apache 2.0, see [fonts/NOTICE.txt](fonts/NOTICE.txt). Not affiliated with or endorsed by Malayan Banking Berhad or BudgetBakers.
+[MIT](LICENSE). The bundled Roboto font (in [fonts/](fonts/)) is Apache 2.0, see [fonts/NOTICE.txt](fonts/NOTICE.txt). Not affiliated with or endorsed by Malayan Banking Berhad, CIMB Bank Berhad or BudgetBakers.

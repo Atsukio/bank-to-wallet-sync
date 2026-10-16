@@ -1,12 +1,12 @@
-import { scanPage, diagnosePage, watchPage, detectAccount } from './scanner.js';
+import { scanPage, diagnosePage, watchPage, detectAccount, readBalance } from './scanner.js';
 import {
   getSettings, listAccounts, balanceOf, listCategories, existingRecords, listRules, matchRule, categoryHistory, guessCategory,
-  memoryKey, sameDescription, toWalletRecord, recordText, createRecords, updateRecords, deleteRecords,
+  memoryKey, sameDescription, mergedNote, toWalletRecord, recordText, createRecords, updateRecords, deleteRecords,
 } from './wallet.js';
-import { signature, matchRecords, carryOver, matchTransferRule } from './matching.js';
+import { signature, matchRecords, carryOver, matchTransferRule, MAX_DATE_LAG, shiftDate } from './matching.js';
 import { isSupportedUrl } from './sites.js';
 import {
-  DEMO_TXS, DEMO_RULES, DEMO_HISTORY, DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSFER_RULES, demoRecords,
+  DEMO_TXS, DEMO_RULES, DEMO_HISTORY, DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSFER_RULES, DEMO_BANK_BALANCE, demoRecords,
 } from './demo.js';
 
 const $ = (id) => document.getElementById(id);
@@ -21,10 +21,12 @@ let pendingButton = null, pendingText = '';
 let demoIgnored = []; // in demo mode "Ignore" is remembered for the session only, never saved
 let accounts = [], categories = [];
 let bank = null;          // { label, digits } the page seems to be showing (see detectAccount)
+let bankBalance = null;   // { label, amount } the balance the bank page shows (see readBalance)
 let accountId = '';       // the Wallet account in use for this page
 let activeTabId = null;
 let lastAdd = null;       // { groups, at, demo? }
 let lastSig = '', lastRead = 0, readTimer;
+let walletRange = null; // { from, to } the last Wallet records request covered, shown by Compare
 
 function setStatus(msg, kind = '') { $('status').textContent = msg; $('status').className = `status ${kind}`; }
 const fmt = (n) => (n < 0 ? '-' : '+') + 'RM ' + Math.abs(n).toLocaleString('en-MY', { minimumFractionDigits: 2 });
@@ -116,8 +118,75 @@ function renderAccount() {
   $('bank').hidden = !bank?.label;
   if (bank?.label) $('bank').textContent = `Reading: ${bank.label}${bank.digits ? ` ••${bank.digits}` : ''}`;
   showBalance(balanceOf(accounts.find((a) => a.id === accountId)), demo ? ' (demo)' : '');
+  renderReconcile();
   updateCount();
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Balance check: the bank's balance against Wallet's, with a confirmed one-record adjustment for the difference.
+
+// What a card or loan page shows is what you owe: positive there, negative in Wallet.
+const OWED_TYPES = ['CreditCard', 'Loan', 'Mortgage'];
+let adjustBy = 0;
+
+function bankExpected(account) {
+  const owed = OWED_TYPES.includes(account?.accountType) || /outstanding|statement|owed|tertunggak|penyata/i.test(bankBalance.label);
+  return { owed, value: owed ? -Math.abs(bankBalance.amount) : bankBalance.amount };
+}
+
+function renderReconcile() {
+  const account = accounts.find((a) => a.id === accountId);
+  const wallet = balanceOf(account);
+  $('adjustConfirm').hidden = true;
+  // on a card or loan, "available" is the credit left, not the balance
+  const creditLeft = OWED_TYPES.includes(account?.accountType) && /available|tersedia|boleh guna/i.test(bankBalance?.label);
+  $('reconcile').hidden = !bankBalance || !wallet || creditLeft;
+  if ($('reconcile').hidden) return;
+  const money = (v) => Math.abs(v).toLocaleString('en-MY', { style: 'currency', currency: wallet.currency || currencyOf(accountId) });
+  const { owed, value } = bankExpected(account);
+  adjustBy = Math.round((value - wallet.value) * 100) / 100;
+  const shown = `Bank ${bankBalance.label.toLowerCase()}: ${bankBalance.amount < 0 ? '-' : ''}${money(bankBalance.amount)}${owed ? ' owed' : ''}`;
+  $('reconcileText').textContent = adjustBy === 0
+    ? `${shown} · matches Wallet ✓`
+    : `${shown} · Wallet is ${money(adjustBy)} ${adjustBy < 0 ? 'higher' : 'lower'}`;
+  $('reconcile').classList.toggle('off', adjustBy !== 0);
+  $('adjust').hidden = adjustBy === 0;
+}
+
+$('adjust').onclick = () => {
+  const pending = txs.filter(isFresh).length;
+  $('adjustText').textContent = `Add a ${fmt(adjustBy)} balance adjustment to ${nameOf(accountId)}, dated now and marked reconciled, so Wallet matches the bank?`
+    + (pending ? ` ${pending} new transaction${pending === 1 ? ' on this page isn\'t' : 's on this page aren\'t'} in Wallet yet: add ${pending === 1 ? 'it' : 'them'} first, or ${pending === 1 ? 'it' : 'they'}'ll be counted twice.` : '');
+  $('adjustText').classList.toggle('unsure', pending > 0);
+  $('adjustConfirm').hidden = false;
+};
+$('adjustNo').onclick = () => { $('adjustConfirm').hidden = true; };
+
+$('adjustYes').onclick = async () => {
+  if (busy || !adjustBy) return;
+  const amount = adjustBy;
+  setBusy(true, { button: $('adjustYes'), label: 'Adding…' });
+  try {
+    const record = {
+      accountId,
+      recordDate: new Date().toISOString(),
+      amount: { value: amount, currencyCode: currencyOf(accountId) },
+      note: `Balance adjustment to match the bank's ${bankBalance.label.toLowerCase()} (${new Date().toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })})`,
+      recordState: 'reconciled',
+    };
+    const [result] = demo ? [{ success: true, id: 'demo-adjustment' }] : await createRecords(settings.token, [record]);
+    if (!result?.success) return setStatus(`Couldn't add the adjustment: ${result?.error || 'unknown error'}`, 'error');
+    lastAdd = { groups: [[result.id]], at: Date.now(), ...(demo && { demo: true }) };
+    if (!demo) save({ lastAdd });
+    setStatus(demo ? 'Demo: pretended to add the adjustment. Nothing was sent.' : `Added a ${fmt(amount)} balance adjustment. You can undo this for 15 minutes.`);
+    if (demo) {
+      const account = accounts.find((a) => a.id === accountId);
+      accounts = accounts.map((a) => (a === account ? { ...a, balance: { ...a.balance, currentBalance: a.balance.currentBalance + amount } } : a));
+    }
+  } catch (e) { setStatus(e.message, 'error'); }
+  finally { setBusy(false); }
+  if (demo) renderAccount(); else await refreshAccounts(true);
+};
 
 function showBalance(b, note = '') {
   $('balance').hidden = !b;
@@ -181,17 +250,19 @@ async function readPageNow({ auto = false, quiet = false, force = false } = {}) 
   const soft = auto || quiet;
   if (!soft) { $('results').hidden = true; $('payload').hidden = true; setStatus('Reading page…'); }
   const target = { tabId: tab.id, allFrames: true };
-  let frames, accountFrames = [];
+  let frames, accountFrames = [], balanceFrames = [];
   try {
     // The watcher survives only until the page navigates, so it is (re)installed on every read.
     if (settings.autoRead) chrome.scripting.executeScript({ target, func: watchPage }).catch(() => {});
-    [frames, accountFrames] = await Promise.all([
+    [frames, accountFrames, balanceFrames] = await Promise.all([
       chrome.scripting.executeScript({ target, func: scanPage }),
       chrome.scripting.executeScript({ target, func: detectAccount }).catch(() => []),
+      chrome.scripting.executeScript({ target, func: readBalance }).catch(() => []),
     ]);
   } catch (e) { return soft ? undefined : setStatus(`Couldn't read the page: ${e.message}`, 'error'); }
 
   bank = accountFrames.map((f) => f.result).find(Boolean) || null;
+  bankBalance = balanceFrames.map((f) => f.result).find(Boolean) || null;
   let raw = frames.flatMap((f) => f.result || []);
   if (settings.collectPages && raw.length) {
     // Keep rows from pages already visited (the current page's rows replace their earlier copies).
@@ -264,7 +335,7 @@ $('exitDemo').onclick = () => exitDemo();
 function enterDemo() {
   $('results').hidden = true; $('payload').hidden = true;
   demo = true;
-  accounts = DEMO_ACCOUNTS; categories = DEMO_CATEGORIES; bank = null;
+  accounts = DEMO_ACCOUNTS; categories = DEMO_CATEGORIES; bank = null; bankBalance = DEMO_BANK_BALANCE;
   accountId = DEMO_ACCOUNTS[0].id;
   renderAccount();
   analyse(DEMO_TXS);
@@ -284,7 +355,7 @@ async function exitDemo({ read = true } = {}) {
 }
 
 function leaveDemo() {
-  demo = false; demoIgnored = []; categories = []; accounts = []; accountId = '';
+  demo = false; demoIgnored = []; bankBalance = null; categories = []; accounts = []; accountId = '';
   if (lastAdd?.demo) { lastAdd = null; showUndo(); }
 }
 
@@ -350,7 +421,8 @@ async function analyse(raw) {
   setStatus('Checking what\'s already in Wallet…');
   try {
     const dates = txs.map((t) => t.date).sort();
-    const records = demo ? demoRecords(txs) : await existingRecords(settings.token, accountId, dates[0], dates.at(-1));
+    walletRange = { from: shiftDate(dates[0], -MAX_DATE_LAG), to: shiftDate(dates.at(-1), MAX_DATE_LAG) };
+    const records = demo ? demoRecords(txs) : await existingRecords(settings.token, accountId, walletRange.from, walletRange.to);
     matchRecords(txs, records);
     walletRecords = records;
     showCoverage(dates, records);
@@ -376,8 +448,10 @@ async function analyse(raw) {
   const fresh = txs.filter(isFresh).length;
   const likely = txs.filter((t) => t.likely).length;
   const mismatched = txs.filter((t) => t.typeMismatch).length;
+  const earlier = txs.filter((t) => t.likely && t.dateLag).length;
   const parts = [fresh ? `${fresh} new of ${txs.length} found.` : `No new transactions among the ${txs.length} found.`];
-  if (likely - mismatched) parts.push(`${likely - mismatched} look like they're already in Wallet (unticked).`);
+  if (likely - mismatched - earlier) parts.push(`${likely - mismatched - earlier} look like they're already in Wallet (unticked).`);
+  if (earlier) parts.push(`${earlier} ${earlier === 1 ? 'is' : 'are'} in Wallet on a nearby date (unticked): "Use bank date" lines ${earlier === 1 ? 'it' : 'them'} up.`);
   if (mismatched) parts.push(`${mismatched} match a Wallet record of the opposite type: use "Fix in Wallet" to correct it.`);
   const bad = ruleNote || mismatched;
   setStatus((demo ? 'DEMO DATA, nothing will be sent to Wallet. ' : '') + parts.join(' ') + ruleNote, bad ? 'warn' : '');
@@ -387,7 +461,9 @@ async function analyse(raw) {
 const shortDate = (d) => new Date(`${d}T12:00:00+08:00`).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' });
 
 // Tells the user whether Wallet has anything at all for the dates being synced.
-function showCoverage(dates, records) {
+function showCoverage(dates, allRecords) {
+  const records = allRecords.filter((r) => r.date >= dates[0] && r.date <= dates.at(-1));
+  records.meta = allRecords.meta;
   const perDay = {};
   records.forEach((r) => { perDay[r.date] = (perDay[r.date] || 0) + 1; });
   const days = [...new Set(dates)];
@@ -470,7 +546,7 @@ function rowFor(t) {
   else if (t.ignored) chips.push(chip('in', 'Ignored'));
   if (fresh && t.transferTo) chips.push(chip('likely', 'Transfer'));
   li.innerHTML = `<input type="checkbox" ${t.selected ? 'checked' : ''} ${t.done || t.ignored ? 'disabled' : ''} aria-label="Include">
-      <span class="desc"></span><span class="amt ${t.amount < 0 ? 'neg' : 'pos'}">${fmt(t.amount)}</span>
+      <span class="desc"></span><span class="amt ${fresh && t.transferTo ? 'xfer' : t.amount < 0 ? 'neg' : 'pos'}"${fresh && t.transferTo ? ' title="Transfer between your accounts"' : ''}>${fmt(t.amount)}</span>
       <span class="sub"><span class="date">${t.date}</span>${chips.join('')}</span>`;
   li.querySelector('.desc').textContent = t.desc;
   li.querySelector('.desc').title = t.desc;
@@ -483,9 +559,20 @@ function rowFor(t) {
       li.append(line('match unsure', shown, button('Fix in Wallet', (e) => fixType([t], e.currentTarget),
         { title: `Change the Wallet record's amount to ${fmt(t.amount)} so its type matches the bank. Category, note and labels are kept.` })));
     }
+  } else if (t.likely && t.dateLag) {
+    const note = walletNote(t).trim();
+    const days = Math.abs(t.dateLag);
+    const when = `${days === 1 ? 'a day' : `${days} days`} ${t.dateLag > 0 ? 'earlier' : 'later'}, on ${shortDate(t.match.date)}`;
+    li.append(line('match', `Wallet has this ${when}${note ? `: "${note}"` : ''}`,
+      button('Use bank date', (e) => moveDate([t], e.currentTarget), { title: `Move the Wallet record from ${shortDate(t.match.date)} to ${shortDate(t.date)} (the bank's date). Its time of day, note, category and labels are kept.` })));
   } else if (t.likely) {
-    li.append(line('match', `In Wallet as: ${t.match?.desc || '(no description found)'}`,
-      button('Replace', (e) => replace([t], e.currentTarget), { title: "Set this Wallet record's note to the bank's description. Amount, payer, category and labels are kept." })));
+    const note = walletNote(t).trim();
+    const becomes = (text) => `Wallet note becomes: "${text}". Amount, payer, category and labels are kept.`;
+    const merge = canMerge(t)
+      ? [button('Merge notes', (e) => replace([t], e.currentTarget, { merge: true }), { title: becomes(mergedNote(note, t.desc)) })]
+      : [];
+    li.append(line('match', note ? `Wallet note: "${note}"` : `In Wallet as: ${t.match?.desc || '(no description)'}`, ...merge,
+      button('Replace note', (e) => replace([t], e.currentTarget), { title: becomes(recordText(t).note) })));
   }
   if (t.ignored) li.append(line('match', "Ignored: this row won't be synced.", button('Restore', () => setIgnored(t, false))));
   if (!fresh) return li;
@@ -546,26 +633,32 @@ function updateBadge() {
 function selected() { return txs.filter((t) => t.selected && !t.done && !t.ignored); }
 
 // Gives the matched Wallet records the bank's description (in the note), so they show as "In Wallet" from now on.
+// Replace overwrites the note; merge keeps it and adds the description ("<your note> · <bank description>").
 // Only the note is patched: the amount already matched, and payer, category and labels stay as they are.
-async function replace(batch, button = null) {
-  batch = batch.filter((t) => t.likely && !t.typeMismatch && (demo || t.match?.id));
+const walletNote = (t) => t.match?.note ?? t.match?.desc ?? '';
+const canMerge = (t) => t.likely && !t.typeMismatch && !t.dateLag && Boolean(walletNote(t).trim()) && (demo || t.match?.id);
+async function replace(batch, button = null, { merge = false } = {}) {
+  batch = batch.filter((t) => t.likely && !t.typeMismatch && !t.dateLag && (demo || t.match?.id));
   if (!batch.length || busy) return;
-  setBusy(true, { button, label: 'Replacing…' });
+  setBusy(true, { button, label: merge ? 'Merging…' : 'Replacing…' });
+  const what = (n) => `${merge ? 'Merged' : 'Replaced'} the note on ${n} Wallet record${n === 1 ? '' : 's'}`;
   setStatus(`Updating ${batch.length} Wallet record${batch.length === 1 ? '' : 's'}…`);
+  const noteFor = (t) => (merge ? mergedNote(walletNote(t), t.desc) : recordText(t).note);
   try {
     const results = demo
       ? batch.map(() => ({ success: true }))
-      : await updateRecords(settings.token, batch.map((t) => ({ id: t.match.id, ...recordText(t) })));
+      : await updateRecords(settings.token, batch.map((t) => ({ id: t.match.id, note: noteFor(t) })));
     const failed = [];
     results.forEach((r, i) => { if (r.success) { Object.assign(batch[i], { done: true, likely: false, selected: false }); } else failed.push(r.error); });
     render();
-    if (failed.length) setStatus(`Updated ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
-    else setStatus(demo ? `Demo: pretended to update ${batch.length}. Nothing was sent.` : `Updated ${batch.length} in Wallet.`);
+    if (failed.length) setStatus(`${what(batch.length - failed.length)}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
+    else setStatus(demo ? `Demo: pretended to update ${batch.length}. Nothing was sent.` : `${what(batch.length)}.`);
   } catch (e) { setStatus(e.message, 'error'); }
   finally { setBusy(false); }
 }
 
 $('replaceAll').onclick = () => replace(txs.filter((t) => t.likely), $('replaceAll'));
+$('mergeAll').onclick = () => replace(txs.filter(canMerge), $('mergeAll'), { merge: true });
 
 // Corrects a Wallet record saved with the wrong type (an expense recorded as income, or the other way round): its
 // amount is set to the bank's signed amount, which also sets the type. Only the amount changes. If the description
@@ -599,10 +692,47 @@ async function fixType(batch, button = null) {
 
 $('fixAll').onclick = () => fixType(txs.filter(canFix), $('fixAll'));
 
+// Moves a Wallet record dated a few days before or after the bank's row (logged before the bank posted it, or an
+// automated/scheduled record) to the bank's date, keeping its time of day, so the two line up. Only the date changes. If the description differs too, the row then offers Merge / Replace.
+const canMove = (t) => t.likely && t.dateLag && (demo || t.match?.id);
+const movedDate = (t) => new Date(Date.parse(t.match.recordDate || `${t.match.date}T12:00:00+08:00`) + t.dateLag * 864e5).toISOString();
+async function moveDate(batch, button = null) {
+  batch = batch.filter(canMove);
+  if (!batch.length || busy) return;
+  setBusy(true, { button, label: 'Moving…' });
+  setStatus(`Moving ${batch.length} Wallet record${batch.length === 1 ? '' : 's'} to the bank's date…`);
+  try {
+    const results = demo
+      ? batch.map(() => ({ success: true }))
+      : await updateRecords(settings.token, batch.map((t) => ({ id: t.match.id, recordDate: movedDate(t) })));
+    const failed = [];
+    results.forEach((r, i) => {
+      const t = batch[i];
+      if (!r.success) return failed.push(r.error);
+      t.match = { ...t.match, date: t.date, recordDate: movedDate(t) };
+      t.dateLag = 0;
+      const same = (t.match.texts || [t.match.desc]).some((x) => sameDescription(x, t.desc));
+      Object.assign(t, same ? { done: true, likely: false } : { likely: true }, { selected: false });
+    });
+    render();
+    if (failed.length) setStatus(`Moved ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
+    else setStatus(demo ? `Demo: pretended to move ${batch.length}. Nothing was sent.` : `Moved ${batch.length} Wallet record${batch.length === 1 ? '' : 's'} to the bank's date.`);
+  } catch (e) { setStatus(e.message, 'error'); }
+  finally { setBusy(false); }
+}
+
+$('moveAll').onclick = () => moveDate(txs.filter(canMove), $('moveAll'));
+
 function updateCount() {
-  const likely = txs.filter((t) => t.likely && !t.typeMismatch).length;
+  const likely = txs.filter((t) => t.likely && !t.typeMismatch && !t.dateLag).length;
   $('replaceAll').hidden = !likely;
-  $('replaceAll').textContent = `Replace ${likely} likely`;
+  const movable = txs.filter(canMove).length;
+  $('moveAll').hidden = movable < 2; // one is moved from its own row; the bulk button is for several
+  $('moveAll').textContent = `Use ${movable} bank dates`;
+  $('replaceAll').textContent = `Replace ${likely} note${likely === 1 ? '' : 's'}`;
+  const mergeable = txs.filter(canMerge).length;
+  $('mergeAll').hidden = !mergeable;
+  $('mergeAll').textContent = `Merge ${mergeable} note${mergeable === 1 ? '' : 's'}`;
   const fixable = txs.filter(canFix).length;
   $('fixAll').hidden = fixable < 2; // one is fixed from its own row; the bulk button is for several
   $('fixAll').textContent = `Fix ${fixable} types`;
@@ -644,7 +774,7 @@ $('compare').onclick = async () => {
   $('payload').textContent = [
     `Using Wallet account: ${nameOf(accountId)}. Bank account seen on the page: ${bank ? `"${mask(bank.label)}" last digits ${mask(bank.digits) || 'none'}` : 'not detected'}`,
     'Wallet record fields: ' + JSON.stringify(walletRecords.sample || null),
-    '', `Wallet records (${walletRecords.length}), as read: date  amount  type  description`, ...rows(walletRecords),
+    '', `Wallet records (${walletRecords.length}) from ${walletRange?.from || '?'} to ${walletRange?.to || '?'} (the bank's dates plus ${MAX_DATE_LAG} days either side), as read: date  amount  type  description  [source, state, updated]`, ...rows(walletRecords),
     '', `Bank transactions (${txs.length}), as read: date  amount  type  description`,
     ...rows(txs.map((t) => ({ date: t.date, amount: Math.abs(t.amount), type: t.amount < 0 ? 'expense' : 'income', desc: t.desc }))),
     ...(pageInfo.length ? ['', 'How the page marks amounts (digits masked):', ...pageInfo] : []),

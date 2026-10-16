@@ -123,6 +123,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
         executeScript: async ({ func }) => {
           if (func.name === 'scanPage') { t.scans++; return [{ result: t.env.rows }]; }
           if (func.name === 'detectAccount') return [{ result: t.env.bank }];
+          if (func.name === 'readBalance') return [{ result: t.env.bankBalance ?? null }];
           if (func.name === 'watchPage') { t.watchers++; return [{}]; }
           return [{ result: {} }];
         },

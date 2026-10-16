@@ -55,6 +55,7 @@ const settle = (ms = 500) => wait(ms);
 {
   const page = await newPanel(browser, server, baseEnv(), 'unsupported.html');
   await settle(200);
+  check('popup lists every supported bank', (await text(page, '#banks')).includes('Maybank2u') && (await text(page, '#banks')).includes('CIMB Clicks') && (await text(page, '#banks')).includes('cimbclicks.com.my'));
   check('popup explains the site is not supported and where the setting is', (await text(page, 'h1')).includes("isn't supported") && (await text(page, '.hint')).includes('Only open on supported sites'));
   await page.evaluate(() => { window.close = () => { window.__closed = true; }; });
   await page.click('#openSettings');

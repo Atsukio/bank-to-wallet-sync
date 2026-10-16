@@ -49,7 +49,7 @@ async function compose({ width, height, html }) {
 const slide = (title, text, img, { cardWidth }) => `
   <div style="padding:0 64px;flex:1"><h1 style="font:500 46px/52px Roboto;margin:0 0 18px;color:#fff">${title}</h1>
     <p style="font:400 22px/32px Roboto;margin:0;opacity:.92">${text}</p>
-    <p style="font:400 14px/20px Roboto;margin:28px 0 0;opacity:.7">Demo data shown. Not affiliated with Maybank or BudgetBakers.</p></div>
+    <p style="font:400 14px/20px Roboto;margin:28px 0 0;opacity:.7">Demo data shown. Not affiliated with Maybank, CIMB or BudgetBakers.</p></div>
   <div style="margin-right:72px;border-radius:14px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.35);background:#fff;flex:none">
     <img src="${img}" style="display:block;width:${cardWidth}px"></div>`;
 
