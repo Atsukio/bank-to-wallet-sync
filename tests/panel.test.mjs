@@ -470,17 +470,42 @@ const settle = (ms = 700) => wait(ms);
 
 // ---------------------------------------------------------------- what's new after an update
 {
-  const { env, page } = await open({ settings: { ...baseEnv().settings, whatsNew: '0.4.0' } });
+  // one version: titled with it, no version heading
+  const { page } = await open({ version: '0.3.0', settings: { ...baseEnv().settings, whatsNewFrom: '0.2.0' } });
   await settle();
-  check("what's new: shown after an update, with a link to the changelog", (await visible(page, '#newsBar')) && (await text(page, '#newsText')).startsWith('Updated to 0.4.0.')
-    && await page.evaluate(() => document.querySelector('#newsText a')?.href.endsWith('CHANGELOG.md')), await text(page, '#newsText'));
-  await page.click('#newsClose'); await settle(200);
-  check("what's new: Dismiss hides it for good", !(await visible(page, '#newsBar')) && (await store(page)).whatsNew === '');
+  check('what\'s new: one version is titled "What\'s new in 0.3.0" with its items and no version heading',
+    (await visible(page, '#whatsNew')) && (await text(page, '#whatsNew h2')) === "What's new in 0.3.0"
+    && await page.evaluate(() => !document.querySelector('#whatsNew h3') && document.querySelectorAll('#whatsNew li').length > 1));
+  // several versions, through the same card with a swapped-in changelog
+  await page.evaluate(async () => {
+    const { showWhatsNew } = await import('./whatsnew.js');
+    const box = document.createElement('section'); box.id = 'multi'; document.body.prepend(box);
+    showWhatsNew(box, [{ version: '0.3.0', items: ['Three <b>bold</b>.'] }, { version: '0.2.5', items: ['Two and a half.'] }, { version: '0.2.0', items: ['Seen.'] }]);
+  });
+  await settle(200);
+  check("what's new: skipped versions each get a heading, newest first, and only unseen ones",
+    (await text(page, '#multi h2')) === "What's new" && await page.evaluate(() => [...document.querySelectorAll('#multi h3')].map((h) => h.textContent).join()) === '0.3.0,0.2.5', await text(page, '#multi'));
+  check("what's new: items are text, never HTML", await page.evaluate(() => !document.querySelector('#multi b') && document.querySelector('#multi li').textContent === 'Three <b>bold</b>.'));
+  await page.click('#whatsNew .whats-new-actions button'); await settle(200);
+  check('what\'s new: "Got it" hides the card, forgets the version and clears the badge',
+    !(await visible(page, '#whatsNew')) && !('whatsNewFrom' in (await store(page))) && (await log(page, 'globalBadge')).at(-1) === '');
   await page.close();
-  const quiet = await newPanel(browser, server, { ...env, settings: { ...env.settings, whatsNew: '0.4.1' } });
+}
+{
+  const { page } = await open({ version: '0.3.0', settings: { ...baseEnv().settings, whatsNewFrom: '0.3.0' } });
   await settle();
-  check("what's new: a version with no note (a small fix) updates quietly", !(await visible(quiet, '#newsBar')));
-  await quiet.close();
+  check("what's new: nothing to tell (a quiet release) clears it silently",
+    !(await visible(page, '#whatsNew')) && !('whatsNewFrom' in (await store(page))) && (await log(page, 'globalBadge')).at(-1) === '');
+  await page.close();
+}
+{
+  const { page } = await open();
+  await settle();
+  check("what's new: no card without an update", !(await visible(page, '#whatsNew')) && !(await log(page, 'globalBadge')).length);
+  await page.evaluate(() => chrome.storage.local.set({ whatsNewFrom: '0.2.0' }));
+  await settle(200);
+  check("what's new: the card appears while the panel is open (an update, or a preview from the console)", await visible(page, '#whatsNew'));
+  await page.close();
 }
 
 await browser.close();

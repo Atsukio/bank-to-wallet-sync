@@ -60,6 +60,15 @@ const settle = (ms = 500) => wait(ms);
   await page.evaluate(() => { window.close = () => { window.__closed = true; }; });
   await page.click('#openSettings');
   check('the cog opens Settings and closes the popup', (await log(page, 'opened')) === 1 && await page.evaluate(() => window.__closed === true));
+  check("the popup shows no what's-new card without an update", !(await visible(page, '#whatsNew')));
+  await page.close();
+}
+{
+  const page = await newPanel(browser, server, { ...baseEnv(), version: '0.3.0', settings: { ...baseEnv().settings, whatsNewFrom: '0.2.0' } }, 'unsupported.html');
+  await settle(200);
+  check("the popup shows the what's-new card too (the NEW badge shows on every site)", (await visible(page, '#whatsNew')) && (await text(page, '#whatsNew h2')) === "What's new in 0.3.0");
+  await page.click('#whatsNew button'); await settle(200);
+  check('...and "Got it" there clears it as well', !(await visible(page, '#whatsNew')) && !('whatsNewFrom' in (await store(page))));
   await page.close();
 }
 

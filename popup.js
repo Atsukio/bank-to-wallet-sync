@@ -5,6 +5,7 @@ import {
 } from './wallet.js';
 import { signature, matchRecords, carryOver, matchTransferRule, MAX_DATE_LAG, shiftDate } from './matching.js';
 import { isSupportedUrl } from './sites.js';
+import { showWhatsNew } from './whatsnew.js';
 import {
   DEMO_TXS, DEMO_RULES, DEMO_HISTORY, DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSFER_RULES, DEMO_BANK_BALANCE, demoRecords,
 } from './demo.js';
@@ -31,6 +32,8 @@ let walletRange = null; // { from, to } the last Wallet records request covered,
 function setStatus(msg, kind = '') { $('status').textContent = msg; $('status').className = `status ${kind}`; }
 const fmt = (n) => (n < 0 ? '-' : '+') + 'RM ' + Math.abs(n).toLocaleString('en-MY', { minimumFractionDigits: 2 });
 const save = (items) => chrome.storage.local.set(items);
+
+showWhatsNew($('whatsNew')); // after an update: what changed, until "Got it"
 const nameOf = (id) => accounts.find((a) => a.id === id)?.name || 'another account';
 const currencyOf = (id) => accounts.find((a) => a.id === id)?.currencyCode || settings.currency || 'MYR';
 const isFresh = (t) => !t.done && !t.likely && !t.ignored;
@@ -208,30 +211,11 @@ $('accountSelect').onchange = async (e) => {
 };
 
 // ---------------------------------------------------------------------------------------------------------------
-// What's new: Chrome updates extensions silently, so after an update (background.js sets whatsNew) the panel shows
-// one short note until dismissed. Only versions listed here get a note, so a small fix can ship quietly.
-
-const WHATS_NEW = {
-  '0.4.0': "Now works with CIMB Clicks, checks your balance against the bank's, and spots records dated a few days off.",
-};
-const CHANGELOG_URL = 'https://github.com/Atsukio/bank-to-wallet-sync/blob/main/CHANGELOG.md';
-
-function showNews() {
-  const text = WHATS_NEW[settings.whatsNew];
-  $('newsBar').hidden = !text;
-  if (!text) return;
-  const link = Object.assign(document.createElement('a'), { href: CHANGELOG_URL, target: '_blank', rel: 'noopener', textContent: 'All changes' });
-  $('newsText').replaceChildren(`Updated to ${settings.whatsNew}. ${text} `, link);
-}
-$('newsClose').onclick = () => { $('newsBar').hidden = true; save({ whatsNew: '' }); };
-
-// ---------------------------------------------------------------------------------------------------------------
 // Reading the page.
 
 async function init() {
   settings = await getSettings();
   lastAdd = settings.lastAdd;
-  showNews();
   $('clear').hidden = !settings.collectPages;
   showUndo();
   if (!settings.token) {
@@ -333,7 +317,6 @@ chrome.storage.onChanged.addListener((changes) => {
   for (const [key, change] of Object.entries(changes)) if (key in settings) settings[key] = change.newValue;
   if ('collectPages' in changes) { $('clear').hidden = !settings.collectPages; if (!settings.collectPages) collectedRaw = []; }
   if ('token' in changes) { accountsCache = { at: 0, promise: null }; }
-  if ('whatsNew' in changes) showNews();
   if ('autoRead' in changes && settings.autoRead) readSoon();
 });
 chrome.runtime.onMessage.addListener((msg) => { if (msg?.type === 'b2w-page-changed') readSoon(); });

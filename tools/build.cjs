@@ -11,7 +11,7 @@ const zlib = require('zlib');
 
 const root = path.resolve(__dirname, '..');
 const FILES = [
-  'manifest.json', 'background.js', 'sites.js', 'wallet.js', 'matching.js', 'scanner.js', 'demo.js',
+  'manifest.json', 'background.js', 'sites.js', 'changelog.js', 'whatsnew.js', 'wallet.js', 'matching.js', 'scanner.js', 'demo.js',
   'popup.html', 'popup.js', 'options.html', 'options.js', 'unsupported.html', 'unsupported.js', 'style.css',
   'icons/icon-16.png', 'icons/icon-32.png', 'icons/icon-48.png', 'icons/icon-128.png',
   'fonts/roboto-latin.woff2', 'fonts/NOTICE.txt', 'fonts/LICENSE-Apache-2.0.txt',

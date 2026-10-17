@@ -16,7 +16,6 @@ export async function getSettings() {
     ignored: [],         // signatures of rows the user chose never to sync
     lastAdd: null,       // { groups: [[recordId, mirrorId?]], at }: what the last "Add" created, for Undo
     accountList: [],     // [{ id, name }] last seen Wallet accounts, so Settings can offer them without a request
-    whatsNew: '',        // version the extension was just updated to, until the panel's note is dismissed
   });
 }
 

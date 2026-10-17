@@ -2,6 +2,7 @@
 import { check, finish, ROOT } from './helpers.mjs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 
 const load = (f) => import(pathToFileURL(path.join(ROOT, f)).href);
 const wallet = await load('wallet.js');
@@ -162,5 +163,20 @@ check('maybank2u pages are supported', isSupportedUrl('https://www.maybank2u.com
 check('CIMB Clicks pages are supported', isSupportedUrl('https://www.cimbclicks.com.my/clicks/#/') && !isSupportedUrl('https://cimbclicks.com.my.evil.example/'));
 check('look-alike hosts are not', !isSupportedUrl('https://maybank2u.com.my.evil.example/') && !isSupportedUrl('http://www.maybank2u.com.my/') && !isSupportedUrl(undefined));
 check('supported banks list is populated', SUPPORTED_BANKS.length >= 1 && SUPPORTED_BANKS.every((b) => b.name && b.country && b.url instanceof RegExp));
+
+// ---- what's new: versions compare as numbers, and only unseen entries up to the running version are shown
+{
+  const { compareVersions, changesSince, CHANGELOG } = await import(pathToFileURL(path.join(ROOT, 'changelog.js')).href);
+  check('versions: 0.10.0 is newer than 0.9.0 (numbers, not strings)', compareVersions('0.10.0', '0.9.0') > 0 && compareVersions('1.2', '1.2.0') === 0 && compareVersions('1.2.0', '1.4.0') < 0);
+  const log = [{ version: '1.5.0', items: ['e'] }, { version: '1.4.0', items: ['d'] }, { version: '1.3.0', items: ['c'] }, { version: '1.2.0', items: ['b'] }];
+  check('changes: skipped versions all show, newest first, none newer than the running one',
+    changesSince('1.2.0', '1.4.0', log).map((e) => e.version).join() === '1.4.0,1.3.0');
+  check('changes: nothing new means nothing to show', changesSince('1.5.0', '1.5.0', log).length === 0);
+  const manifest = JSON.parse(readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+  check('changelog: newest first, items are plain sentences, nothing newer than manifest.json',
+    CHANGELOG.every((e, i) => i === 0 || compareVersions(CHANGELOG[i - 1].version, e.version) > 0)
+    && CHANGELOG.every((e) => e.items.length && e.items.every((s) => /^[A-Z].*\.$/.test(s)))
+    && compareVersions(CHANGELOG[0].version, manifest.version) <= 0);
+}
 
 finish();

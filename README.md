@@ -85,7 +85,7 @@ npm run palette -- "#1a73e8" --write   # regenerate the Material 3 colours in st
 Tests use a stubbed browser and a fake Wallet, never real data or a real token. Set `CHROME_PATH` if no Chrome/Edge is found. GitHub Actions runs the tests and the build on every push. See [AGENTS.md](AGENTS.md) for the architecture and the things worth knowing before changing it.
 
 ## Publishing to the Chrome Web Store
-Listing text, permission justifications and data-usage answers are in [store/LISTING.md](store/LISTING.md), with 1280×800 screenshots and a small promo tile alongside. Bump `version` in `manifest.json`, run `npm run build`, and upload the zip from `dist/`.
+Listing text, permission justifications and data-usage answers are in [store/LISTING.md](store/LISTING.md), with 1280×800 screenshots and a small promo tile alongside. Bump `version` in `manifest.json`, run `npm run build`, and upload the zip from `dist/`. If users should hear about the release, add a plain-language entry to `changelog.js` in the same commit as the version bump: after updating, they see it in a "What's new" card and a NEW badge on the icon.
 
 ## License
 [MIT](LICENSE). The bundled Roboto font (in [fonts/](fonts/)) is Apache 2.0, see [fonts/NOTICE.txt](fonts/NOTICE.txt). Not affiliated with or endorsed by Malayan Banking Berhad, CIMB Bank Berhad or BudgetBakers.

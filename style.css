@@ -102,3 +102,13 @@ a { color: var(--md-primary); }
 .status { min-height: 24px; margin: 8px 0; }
 .status.error { color: var(--md-error); }
 .status.warn { color: var(--warn); }
+
+/* "What's new" card after an update (whatsnew.js): stands out from the settings, stays compact. */
+.whats-new { margin: 8px 0 12px; padding: 12px 12px 4px 16px; border-radius: 12px; background: var(--md-secondary-container); color: var(--md-on-secondary-container); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
+.whats-new h2 { margin: 0 0 4px; font: 500 16px/24px Roboto, system-ui, sans-serif; letter-spacing: .15px; }
+.whats-new h3 { margin: 8px 0 2px; font: 500 14px/20px Roboto, system-ui, sans-serif; letter-spacing: .1px; }
+.whats-new ul { margin: 0; padding: 0 0 0 18px; border: 0; list-style: disc; } /* the panel styles bare ul/li as its review list */
+.whats-new li { display: list-item; padding: 0; border: 0; }
+.whats-new li + li { margin-top: 2px; }
+.whats-new-actions { display: flex; justify-content: flex-end; }
+.whats-new-actions button { color: inherit; border: none; padding: 4px 12px; }

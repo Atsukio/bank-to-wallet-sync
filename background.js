@@ -1,5 +1,6 @@
 import { isSupportedUrl } from './sites.js';
 import { BEHAVIOUR_DEFAULTS } from './wallet.js';
+import { noteUpdate, restoreBadge } from './whatsnew.js';
 
 // Two settings decide how the side panel behaves (Settings page; defaults shown):
 //   onlySupported (true): the toolbar button opens the panel only on a supported bank. Elsewhere it shows a small
@@ -32,12 +33,14 @@ chrome.runtime.onInstalled.addListener(async ({ reason, previousVersion }) => {
   await syncAllTabs();
   // First run: open Settings, which shows a short getting-started guide until a token is saved.
   if (reason === 'install') chrome.runtime.openOptionsPage();
-  // Chrome updates silently, so the panel shows a dismissible "what's new" note next time it opens.
-  const version = chrome.runtime.getManifest().version;
-  if (reason === 'update' && previousVersion !== version) await chrome.storage.local.set({ whatsNew: version });
+  // Chrome updates silently: remember where the user came from and put NEW on the icon (see whatsnew.js).
+  if (reason === 'update') await noteUpdate(previousVersion);
 });
 
-chrome.runtime.onStartup.addListener(syncAllTabs);
+chrome.runtime.onStartup.addListener(async () => {
+  await syncAllTabs();
+  await restoreBadge();
+});
 
 // Changing either switch applies to every open tab straight away.
 chrome.storage.onChanged.addListener((changes) => {

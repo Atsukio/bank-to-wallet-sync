@@ -71,7 +71,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
   await page.setViewport({ width: 420, height: 900 });
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }]);
   await page.evaluateOnNewDocument((e) => {
-    const t = (window.__t = { env: e, scans: 0, watchers: 0, fetches: [], created: [], deleted: [], patched: [], badge: [], opened: 0, mirror: 0, listeners: { message: [], updated: [], activated: [], storage: [] } });
+    const t = (window.__t = { env: e, scans: 0, watchers: 0, fetches: [], created: [], deleted: [], patched: [], badge: [], globalBadge: [], opened: 0, mirror: 0, listeners: { message: [], updated: [], activated: [], storage: [] } });
     const store = { ...e.settings };
     t.store = store;
     const json = (body) => ({ ok: true, status: 200, headers: new Headers(e.headers), json: async () => body });
@@ -104,20 +104,27 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
     window.chrome = {
       storage: {
         local: {
-          get: async (defaults) => ({ ...defaults, ...store }),
+          get: async (keys) => (typeof keys === 'string' ? (keys in store ? { [keys]: store[keys] } : {}) : { ...keys, ...store }),
           set: async (items) => {
             const changes = {};
             for (const [k, v] of Object.entries(items)) { changes[k] = { oldValue: store[k], newValue: v }; store[k] = v; }
             t.listeners.storage.forEach((f) => f(changes, 'local'));
           },
+          remove: async (key) => {
+            if (!(key in store)) return;
+            const changes = { [key]: { oldValue: store[key] } };
+            delete store[key];
+            t.listeners.storage.forEach((f) => f(changes, 'local'));
+          },
         },
         onChanged: ev('storage'),
       },
-      runtime: { openOptionsPage() { t.opened++; }, onMessage: ev('message') },
+      runtime: { openOptionsPage() { t.opened++; }, onMessage: ev('message'), getManifest: () => ({ version: e.version || '0.3.0' }) },
       tabs: { query: async () => [tab()], onUpdated: ev('updated'), onActivated: ev('activated') },
       action: {
-        setBadgeText: async (o) => { t.badge.push(o.text); },
+        setBadgeText: async (o) => { t.badge.push(o.text); if (o.tabId == null) t.globalBadge.push(o.text); },
         setBadgeBackgroundColor: async () => {},
+        setBadgeTextColor: async () => {},
       },
       scripting: {
         executeScript: async ({ func }) => {

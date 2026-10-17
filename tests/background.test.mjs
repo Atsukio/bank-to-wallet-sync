@@ -3,16 +3,25 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { check, finish, ROOT, wait } from './helpers.mjs';
 
-let prefs = {}, calls = [], opened = 0;
+let prefs = {}, calls = [], opened = 0, badge = [];
 const L = {};
 const listener = (name) => ({ addListener: (f) => { L[name] = f; } });
 globalThis.chrome = {
-  storage: { local: { get: async (d) => ({ ...d, ...prefs }), set: async (o) => { Object.assign(prefs, o); } }, onChanged: listener('storage') },
+  storage: {
+    local: {
+      get: async (d) => (typeof d === 'string' ? (d in prefs ? { [d]: prefs[d] } : {}) : { ...d, ...prefs }),
+      set: async (o) => { Object.assign(prefs, o); }, remove: async (k) => { delete prefs[k]; },
+    },
+    onChanged: listener('storage'),
+  },
   sidePanel: {
     setOptions: async (o) => { calls.push(['panel', o.tabId ?? 'global', o.enabled]); },
     setPanelBehavior: async () => {}, open: async (o) => { calls.push(['open', o.tabId]); },
   },
-  action: { setPopup: async (o) => { calls.push(['popup', o.tabId, o.popup]); }, onClicked: listener('clicked') },
+  action: {
+    setPopup: async (o) => { calls.push(['popup', o.tabId, o.popup]); }, onClicked: listener('clicked'),
+    setBadgeText: async (o) => { badge.push(o.text); }, setBadgeBackgroundColor: async () => {}, setBadgeTextColor: async () => {},
+  },
   tabs: {
     query: async () => [{ id: 1, url: 'https://www.maybank2u.com.my/history' }, { id: 2, url: 'https://example.com/' }],
     get: async (id) => ({ id, url: id === 1 ? 'https://www.maybank2u.com.my/x' : 'https://example.com/' }),
@@ -48,14 +57,22 @@ L.clicked({ id: 1 });
 check('icon click (and the shortcut) opens the panel for that tab', calls.some((c) => c[0] === 'open' && c[1] === 1));
 
 opened = 0;
+// ---- what's new (the running version is 9.9.0 here)
 await L.installed({ reason: 'update', previousVersion: '9.8.0' });
 check('updating does not open Settings', opened === 0);
-check("updating flags the new version for the panel's what's-new note", prefs.whatsNew === '9.9.0', JSON.stringify(prefs.whatsNew));
-delete prefs.whatsNew;
+check("what's new: an update stores the version the user came from and puts NEW on the icon", prefs.whatsNewFrom === '9.8.0' && badge.at(-1) === 'NEW', JSON.stringify([prefs.whatsNewFrom, badge]));
+await L.installed({ reason: 'update', previousVersion: '9.8.5' });
+check("what's new: a second update before the card is seen keeps the older version", prefs.whatsNewFrom === '9.8.0', prefs.whatsNewFrom);
+delete prefs.whatsNewFrom; badge = [];
 await L.installed({ reason: 'update', previousVersion: '9.9.0' });
-check('a reload without a new version (e.g. Chrome itself updating) shows no note', !('whatsNew' in prefs));
+check("what's new: reloading the same version (an unpacked copy) does nothing", !('whatsNewFrom' in prefs) && !badge.length);
 await L.installed({ reason: 'install' });
 check('a fresh install opens Settings (the getting-started guide)', opened === 1);
-check("a fresh install shows no what's-new note", !('whatsNew' in prefs));
+check("what's new: a fresh install shows nothing", !('whatsNewFrom' in prefs) && !badge.length);
+await L.startup();
+check("what's new: a browser restart with nothing pending sets no badge", !badge.length);
+prefs.whatsNewFrom = '9.8.0';
+await L.startup();
+check('what\'s new: a browser restart before "Got it" puts NEW back', badge.at(-1) === 'NEW');
 
 finish();
