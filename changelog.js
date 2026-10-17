@@ -3,6 +3,15 @@
 // a release without an entry updates quietly.
 export const CHANGELOG = [
   {
+    version: '0.6.0',
+    items: [
+      'Merge, Replace, Fix and Use bank date no longer lock the panel: click as many as you like and they\'re sent in the background.',
+      'The select-all bar and Add to Wallet stay in view while you scroll a long list.',
+      'Colours now show at a glance what\'s new, what\'s likely already in Wallet, and what needs a look.',
+      'A long account name under the picker is shortened, keeping the last four digits visible.',
+    ],
+  },
+  {
     version: '0.3.0',
     items: [
       'Works with CIMB Clicks too, including transactions that load as you scroll.',
