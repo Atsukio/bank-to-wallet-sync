@@ -36,6 +36,7 @@ for (const must of ['background.js', 'popup.html', 'popup.js', 'options.html', '
   check(`zip contains ${must}`, names.includes(must));
 }
 check('development files stay out (tests, tools, node_modules, store assets, docs)', !names.some((n) => /^(tests|tools|node_modules|store|dist|\.github)\//.test(n) || /(\.md|package\.json|package-lock\.json)$/.test(n)));
+check('the manifest description fits the Web Store limit (132 characters)', manifest.description.length <= 132, String(manifest.description.length));
 check('the manifest only asks for the permissions it needs', JSON.stringify(manifest.permissions.slice().sort()) === JSON.stringify(['activeTab', 'scripting', 'sidePanel', 'storage']), JSON.stringify(manifest.permissions));
 const { SUPPORTED_BANKS } = await import(new URL('../sites.js', import.meta.url).href);
 const allowedHosts = [...SUPPORTED_BANKS.map((b) => b.host), 'rest.budgetbakers.com'];
