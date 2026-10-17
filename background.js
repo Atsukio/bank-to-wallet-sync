@@ -27,11 +27,14 @@ async function syncAllTabs() {
   await Promise.all(tabs.map((t) => syncTab(t.id, t.url, prefs)));
 }
 
-chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+chrome.runtime.onInstalled.addListener(async ({ reason, previousVersion }) => {
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
   await syncAllTabs();
   // First run: open Settings, which shows a short getting-started guide until a token is saved.
   if (reason === 'install') chrome.runtime.openOptionsPage();
+  // Chrome updates silently, so the panel shows a dismissible "what's new" note next time it opens.
+  const version = chrome.runtime.getManifest().version;
+  if (reason === 'update' && previousVersion !== version) await chrome.storage.local.set({ whatsNew: version });
 });
 
 chrome.runtime.onStartup.addListener(syncAllTabs);

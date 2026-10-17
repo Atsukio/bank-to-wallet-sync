@@ -468,6 +468,21 @@ const settle = (ms = 700) => wait(ms);
   await page.close();
 }
 
+// ---------------------------------------------------------------- what's new after an update
+{
+  const { env, page } = await open({ settings: { ...baseEnv().settings, whatsNew: '0.4.0' } });
+  await settle();
+  check("what's new: shown after an update, with a link to the changelog", (await visible(page, '#newsBar')) && (await text(page, '#newsText')).startsWith('Updated to 0.4.0.')
+    && await page.evaluate(() => document.querySelector('#newsText a')?.href.endsWith('CHANGELOG.md')), await text(page, '#newsText'));
+  await page.click('#newsClose'); await settle(200);
+  check("what's new: Dismiss hides it for good", !(await visible(page, '#newsBar')) && (await store(page)).whatsNew === '');
+  await page.close();
+  const quiet = await newPanel(browser, server, { ...env, settings: { ...env.settings, whatsNew: '0.4.1' } });
+  await settle();
+  check("what's new: a version with no note (a small fix) updates quietly", !(await visible(quiet, '#newsBar')));
+  await quiet.close();
+}
+
 await browser.close();
 server.close();
 finish();

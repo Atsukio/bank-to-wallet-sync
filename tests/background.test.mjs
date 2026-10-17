@@ -7,7 +7,7 @@ let prefs = {}, calls = [], opened = 0;
 const L = {};
 const listener = (name) => ({ addListener: (f) => { L[name] = f; } });
 globalThis.chrome = {
-  storage: { local: { get: async (d) => ({ ...d, ...prefs }) }, onChanged: listener('storage') },
+  storage: { local: { get: async (d) => ({ ...d, ...prefs }), set: async (o) => { Object.assign(prefs, o); } }, onChanged: listener('storage') },
   sidePanel: {
     setOptions: async (o) => { calls.push(['panel', o.tabId ?? 'global', o.enabled]); },
     setPanelBehavior: async () => {}, open: async (o) => { calls.push(['open', o.tabId]); },
@@ -18,7 +18,7 @@ globalThis.chrome = {
     get: async (id) => ({ id, url: id === 1 ? 'https://www.maybank2u.com.my/x' : 'https://example.com/' }),
     onUpdated: listener('updated'), onActivated: listener('activated'),
   },
-  runtime: { onInstalled: listener('installed'), onStartup: listener('startup'), openOptionsPage: () => { opened++; } },
+  runtime: { onInstalled: listener('installed'), onStartup: listener('startup'), openOptionsPage: () => { opened++; }, getManifest: () => ({ version: '9.9.0' }) },
 };
 await import(pathToFileURL(path.join(ROOT, 'background.js')).href);
 
@@ -48,9 +48,14 @@ L.clicked({ id: 1 });
 check('icon click (and the shortcut) opens the panel for that tab', calls.some((c) => c[0] === 'open' && c[1] === 1));
 
 opened = 0;
-await L.installed({ reason: 'update' });
+await L.installed({ reason: 'update', previousVersion: '9.8.0' });
 check('updating does not open Settings', opened === 0);
+check("updating flags the new version for the panel's what's-new note", prefs.whatsNew === '9.9.0', JSON.stringify(prefs.whatsNew));
+delete prefs.whatsNew;
+await L.installed({ reason: 'update', previousVersion: '9.9.0' });
+check('a reload without a new version (e.g. Chrome itself updating) shows no note', !('whatsNew' in prefs));
 await L.installed({ reason: 'install' });
 check('a fresh install opens Settings (the getting-started guide)', opened === 1);
+check("a fresh install shows no what's-new note", !('whatsNew' in prefs));
 
 finish();

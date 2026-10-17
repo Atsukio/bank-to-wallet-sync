@@ -23,6 +23,7 @@ Plain ES modules, no bundler, **no runtime dependencies**, no build step: load t
 | `tests/` | `npm test`: logic, scanner, background, panel, pages and build tests. `helpers.mjs` has the browser/Wallet stub. |
 | `tools/` | `build.cjs` (zip), `palette.cjs` (M3 colours), `screenshots.mjs` (store images). |
 | `.github/workflows/ci.yml` | Runs `npm test` and `npm run build` on every push and PR. |
+| `CHANGELOG.md` | User-facing changes per version, in plain words (the panel's what's-new note links to it on GitHub). |
 | `PRIVACY.md` | Privacy policy (its URL goes in the Web Store dashboard). Keep it true to what the code does. |
 | `dist/` | Built upload zip (the one place `.zip` is not gitignored). |
 
@@ -76,9 +77,11 @@ Browser for tests: Edge/Chrome are found automatically on Windows, macOS and Lin
 
 **Balance check** (`readBalance` in `scanner.js`, `renderReconcile` in `popup.js`): reads the page's "Outstanding Balance", else "Current/Ledger", else "Available", else "Statement" (and Malay labels), the amount right after its label, up to 5 levels up (CIMB: `.value-box > label + .value number-cmp`; Maybank2u card: `<p>` label in `.panel-body`, amount in the sibling `.well`). Outstanding beats statement because a card's statement balance is only what was owed on the statement date (the owner asked for this). Compared with the Wallet account's balance; a card/loan (`accountType` CreditCard/Loan/Mortgage, or an "outstanding"/"statement" label) counts the bank figure as owed (negative); on such an account an "Available" figure is the credit left, so the check is hidden. **Adjust** asks first (warning if new rows aren't added yet, since they'd be counted twice), then POSTs one record for the difference: note "Balance adjustment to match the bank's …", `recordState: 'reconciled'`, dated now, no category (the API has no adjustment concept). It goes into `lastAdd`, so Undo removes it. `detectAccount` first uses `option[data-account-no]` (CIMB tags its account picker with `data-label` / `data-account-no`).
 
+**What's new**: Chrome updates extensions silently. On `onInstalled` with reason `update` (and a changed version) `background.js` stores `whatsNew: <version>`; the panel shows `WHATS_NEW[version]` from `popup.js` in a dismissible bar with a link to `CHANGELOG.md`, and Dismiss clears `whatsNew`. A version without a `WHATS_NEW` entry updates quietly (use that for small fixes).
+
 **Other**: ignore list (`ignored`, capped at 2000 signatures); toolbar badge = number of new rows (set while the panel is open); first install opens Settings (getting-started card until a token is saved); `commands._execute_action` shortcut fires the same `onClicked`; balance = `balance.currentBalance` of the selected account. Bank description goes in `note` (255 max), `counterParty` is unset. Dates are Malaysia time (UTC+8); records are created at 12:00 +08:00. Old `[m2u:<hash>]` note tags are stripped when reading.
 
-**Settings** (`chrome.storage.local`; defaults in `getSettings`): `onlySupported`, `hideWhenAway` (service worker), `autoRead`, `collectPages` (panel), plus `token`, `accountId`/`accountName`, `currency`, `accountMap`, `transferRules`, `categoryMemory`, `ignored`, `lastAdd`, `accountList`. Changes apply live through `storage.onChanged`. The Chrome semantics of "panel stays open across tabs" (global enabled + per-tab enabled with the same path) are inferred from the docs and **untested in a real browser**.
+**Settings** (`chrome.storage.local`; defaults in `getSettings`): `onlySupported`, `hideWhenAway` (service worker), `autoRead`, `collectPages` (panel), plus `token`, `accountId`/`accountName`, `currency`, `accountMap`, `transferRules`, `categoryMemory`, `ignored`, `lastAdd`, `accountList`, `whatsNew`. Changes apply live through `storage.onChanged`. The Chrome semantics of "panel stays open across tabs" (global enabled + per-tab enabled with the same path) are inferred from the docs and **untested in a real browser**.
 
 **Busy state** (`setBusy` in `popup.js`): every action that talks to Wallet (read, Replace, Add, Undo, Compare, leaving demo, the first account load) shows an M3 indeterminate progress bar; user-started ones also make `#app` `inert` (dimmed, no clicks or focus, so no double requests) and give the pressed button a spinner and a label ("Replacing…", "Adding…", "Undoing…"). Automatic refreshes show only the bar. A read requested while busy is queued in `rerun` and runs when the work finishes (newest wins, `force` sticks), never dropped. New async actions must go through `setBusy`. The test stub's `env.delay` slows the fake Wallet's writes so tests can see this state.
 
@@ -117,8 +120,9 @@ Not coverable headless, so verify in a real browser when touching them: the serv
 ## Releasing to the Web Store
 1. Bump `version` in `manifest.json` (the store rejects a re-upload with the same version).
 2. `npm test`, then `npm run build -- --clean`. The zip is written and verified by `tools/build.cjs`. **Do not build zips with `tar`**: Git for Windows' GNU `tar -a -cf x.zip` silently writes a plain tar archive, which the store rejects (the committed 0.1.0 and 0.1.1 zips were affected).
-3. Update `store/LISTING.md` and `PRIVACY.md` if permissions or behaviour changed (the store's data-usage answers must match). `npm run screenshots` after visible UI changes.
-4. Upload `dist/bank-to-wallet-sync-<version>.zip`.
+3. Move the `CHANGELOG.md` entry from unreleased to the version and date, and add a one-sentence `WHATS_NEW` entry in `popup.js` for releases users should hear about.
+4. Update `store/LISTING.md` and `PRIVACY.md` if permissions or behaviour changed (the store's data-usage answers must match). `npm run screenshots` after visible UI changes.
+5. Upload `dist/bank-to-wallet-sync-<version>.zip`.
 
 ## Commit messages
 All commits follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
