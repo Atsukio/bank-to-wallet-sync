@@ -148,8 +148,8 @@ All commits follow [Conventional Commits 1.0.0](https://www.conventionalcommits.
 - They ask for commits and pushes explicitly. Don't push unprompted; offer when a coherent set of changes is ready. Commit messages follow [Commit messages](#commit-messages) and end with the `Co-Authored-By` line from the session's attribution instructions. Git identity is configured globally.
 - They iterate on look and feel (colour, size, density) from screenshots: show a render before and after.
 
-## Status as of 2026-10-16 (v0.3.0)
-- Released in git: v0.1.1, v0.1.2, v0.2.0 and v0.3.0 (`chore(release): v0.3.0`; adds CIMB Clicks, so the store update asks users to accept the new host permission). The 0.1.0/0.1.1 zips committed earlier were tar archives (see Releasing); 0.1.2 onwards are real zips from `tools/build.cjs`.
+## Status as of 2026-10-17 (v0.4.0)
+- Released in git: v0.1.1, v0.1.2, v0.2.0, v0.3.0 (adds CIMB Clicks, so the store update asks users to accept the new host permission) and v0.4.0 (`chore(release): v0.4.0`; the What's new card and NEW badge; no changelog entry of its own, so it updates quietly from 0.3.0). The 0.1.0/0.1.1 zips committed earlier were tar archives (see Releasing); 0.1.2 onwards are real zips from `tools/build.cjs`.
 - Web Store: the owner is submitting it. Upload `dist/bank-to-wallet-sync-<version>.zip`; listing text, data-usage answers and reviewer test instructions (use Demo data; turn off "Only open on supported sites" first) are in `store/LISTING.md`.
 - Unverified in a real browser or against the live Wallet API: the service worker behaviours, `detectAccount` on Maybank2u and CIMB, transfers, Undo (DELETE), `GET /categories`, Fix in Wallet (PATCH amount), Use bank date (PATCH recordDate), Merge/Replace (PATCH note) and the balance check/Adjust on the real pages. Treat them cautiously on first use (one transaction).
 - Not done: more banks (needs sample pages from each bank; the scanner is header-based so a table-style bank may mostly need a `sites.js` entry and a manifest host), Firefox.
