@@ -95,10 +95,19 @@ const CIMB = 'https://*.cimbclicks.com.my/*';
   const page = await newPanel(browser, server, { ...baseEnv(), noAccess: [CIMB] }, 'options.html');
   await settle(300);
   const cimbItem = () => page.evaluate(() => [...document.querySelectorAll('#banks li')].find((li) => li.textContent.includes('CIMB'))?.textContent);
+  // whether the CIMB item's state text has the colour of a token
+  const stateIs = (sel, token) => page.evaluate(([sel, token]) => {
+    const el = [...document.querySelectorAll('#banks li')].find((li) => li.textContent.includes('CIMB'))?.querySelector(sel);
+    const hex = getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+    const rgb = hex.replace(/^#(..)(..)(..)$/, (_, r, g, b) => `rgb(${parseInt(r, 16)}, ${parseInt(g, 16)}, ${parseInt(b, 16)})`);
+    return !!el && hex.startsWith('#') && getComputedStyle(el).color === rgb;
+  }, [sel, token]);
   check('Settings: Maybank2u needs nothing, CIMB Clicks shows it needs permission',
     !(await page.evaluate(() => document.querySelector('#banks li').querySelector('button'))) && (await cimbItem()).includes('needs your permission'), await cimbItem());
+  const neededAmber = await stateIs('.access-needed', '--warn');
   await page.evaluate(() => [...document.querySelectorAll('#banks button')].find((b) => b.textContent === 'Allow').click()); await settle(200);
   check('Settings: Allow grants it', (await log(page, 'requested')).includes(CIMB) && (await cimbItem()).includes('(allowed)'), await cimbItem());
+  check('Settings: the access state is colour-coded (needs permission amber, allowed green)', neededAmber && await stateIs('.access-ok', '--credit'), String(neededAmber));
   await page.evaluate(() => [...document.querySelectorAll('#banks button')].find((b) => b.textContent === 'Remove access').click()); await settle(200);
   check('Settings: Remove access gives it back', (await log(page, 'removed')).includes(CIMB) && (await cimbItem()).includes('needs your permission'), await cimbItem());
   await page.close();

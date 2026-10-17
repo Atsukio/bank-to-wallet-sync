@@ -30,6 +30,11 @@ let lastSig = '', lastRead = 0, readTimer;
 let walletRange = null; // { from, to } the last Wallet records request covered, shown by Compare
 
 function setStatus(msg, kind = '') { $('status').textContent = msg; $('status').className = `status ${kind}`; }
+// A status made of sentences, each coloured by its kind: [[text, 'new' | 'likely' | 'check' | 'warn' | ''], …]
+function setStatusParts(parts) {
+  $('status').className = 'status';
+  $('status').replaceChildren(...parts.flatMap(([text, kind], i) => [i ? ' ' : '', Object.assign(document.createElement('span'), { className: kind ? `s-${kind}` : '', textContent: text })]));
+}
 const fmt = (n) => (n < 0 ? '-' : '+') + 'RM ' + Math.abs(n).toLocaleString('en-MY', { minimumFractionDigits: 2 });
 const save = (items) => chrome.storage.local.set(items);
 
@@ -48,7 +53,7 @@ $('openSettings').onclick = (e) => { e.preventDefault(); chrome.runtime.openOpti
 // pressed shows a spinner and what it is doing. Automatic refreshes show only the bar, so they never dim the panel.
 function setBusy(on, { lock = true, button = null, label = '' } = {}) {
   busy = on;
-  $('progress').hidden = !on;
+  showProgress();
   $('app').inert = on && lock;
   document.body.setAttribute('aria-busy', String(on));
   if (on && button) {
@@ -64,8 +69,11 @@ function setBusy(on, { lock = true, button = null, label = '' } = {}) {
     pendingButton = null;
   }
   updateCount(); showUndo(); // these own the text of Add, Replace-all and Undo
-  if (rerun) { const next = rerun; rerun = null; setTimeout(() => readPage(next), 0); }
+  if (rerun && !editing) { const next = rerun; rerun = null; setTimeout(() => readPage(next), 0); }
 }
+
+// The bar shows while anything talks to Wallet: a locking action (busy) or the queue of record edits (editing).
+function showProgress() { $('progress').hidden = !(busy || editing); }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Accounts: which Wallet account this page's transactions belong to.
@@ -119,7 +127,14 @@ function renderAccount() {
     select.value = accountId;
   } else if (settings?.accountName) $('account').textContent = settings.accountName;
   $('bank').hidden = !bank?.label;
-  if (bank?.label) $('bank').textContent = `Reading: ${bank.label}${bank.digits ? ` ••${bank.digits}` : ''}`;
+  if (bank?.label) {
+    // Pages often put the full account number in the name; the last four digits are shown separately (masked).
+    const label = bank.label.replace(/\d[\d\s-]{4,}\d/g, '').replace(/\s+/g, ' ').replace(/[\s·:,-]+$/, '').trim() || 'bank account';
+    const digits = bank.digits ? `••${bank.digits}` : '';
+    $('bankLabel').textContent = `Reading: ${label}`;
+    $('bankDigits').textContent = digits;
+    $('bank').title = `Reading: ${label} ${digits}`.trim();
+  }
   showBalance(balanceOf(accounts.find((a) => a.id === accountId)), demo ? ' (demo)' : '');
   renderReconcile();
   updateCount();
@@ -149,10 +164,12 @@ function renderReconcile() {
   const { owed, value } = bankExpected(account);
   adjustBy = Math.round((value - wallet.value) * 100) / 100;
   const shown = `Bank ${bankBalance.label.toLowerCase()}: ${bankBalance.amount < 0 ? '-' : ''}${money(bankBalance.amount)}${owed ? ' owed' : ''}`;
-  $('reconcileText').textContent = adjustBy === 0
-    ? `${shown} · matches Wallet ✓`
-    : `${shown} · Wallet is ${money(adjustBy)} ${adjustBy < 0 ? 'higher' : 'lower'}`;
-  $('reconcile').classList.toggle('off', adjustBy !== 0);
+  // the bank figure stays neutral; the verdict is green when it matches, amber when it doesn't
+  const verdict = Object.assign(document.createElement('span'), {
+    className: adjustBy === 0 ? 'verdict ok' : 'verdict off',
+    textContent: adjustBy === 0 ? 'matches Wallet ✓' : `Wallet is ${money(adjustBy)} ${adjustBy < 0 ? 'higher' : 'lower'}`,
+  });
+  $('reconcileText').replaceChildren(`${shown} · `, verdict);
   $('adjust').hidden = adjustBy === 0;
 }
 
@@ -181,7 +198,7 @@ $('adjustYes').onclick = async () => {
     if (!result?.success) return setStatus(`Couldn't add the adjustment: ${result?.error || 'unknown error'}`, 'error');
     lastAdd = { groups: [[result.id]], at: Date.now(), ...(demo && { demo: true }) };
     if (!demo) save({ lastAdd });
-    setStatus(demo ? 'Demo: pretended to add the adjustment. Nothing was sent.' : `Added a ${fmt(amount)} balance adjustment. You can undo this for 15 minutes.`);
+    setStatus(demo ? 'Demo: pretended to add the adjustment. Nothing was sent.' : `Added a ${fmt(amount)} balance adjustment. You can undo this for 15 minutes.`, demo ? '' : 'ok');
     if (demo) {
       const account = accounts.find((a) => a.id === accountId);
       accounts = accounts.map((a) => (a === account ? { ...a, balance: { ...a.balance, currentBalance: a.balance.currentBalance + amount } } : a));
@@ -238,7 +255,7 @@ async function readPage(opts = {}) {
   const { auto = false, quiet = false } = opts;
   if (auto && (demo || !ready() || !settings.autoRead)) return;
   // Something is already in flight: do this once it finishes (the newest request wins, and force sticks).
-  if (busy) { rerun = { ...opts, force: opts.force || rerun?.force }; return; }
+  if (busy || editing) { rerun = { ...opts, force: opts.force || rerun?.force }; return; }
   setBusy(true, { lock: !auto, button: auto || quiet ? null : $('read'), label: 'Reading…' });
   try { await readPageNow(opts); } finally { setBusy(false); }
 }
@@ -464,12 +481,16 @@ async function analyse(raw) {
   const likely = txs.filter((t) => t.likely).length;
   const mismatched = txs.filter((t) => t.typeMismatch).length;
   const earlier = txs.filter((t) => t.likely && t.dateLag).length;
-  const parts = [fresh ? `${fresh} new of ${txs.length} found.` : `No new transactions among the ${txs.length} found.`];
-  if (likely - mismatched - earlier) parts.push(`${likely - mismatched - earlier} look like they're already in Wallet (unticked).`);
-  if (earlier) parts.push(`${earlier} ${earlier === 1 ? 'is' : 'are'} in Wallet on a nearby date (unticked): "Use bank date" lines ${earlier === 1 ? 'it' : 'them'} up.`);
-  if (mismatched) parts.push(`${mismatched} match a Wallet record of the opposite type: use "Fix in Wallet" to correct it.`);
-  const bad = ruleNote || mismatched;
-  setStatus((demo ? 'DEMO DATA, nothing will be sent to Wallet. ' : '') + parts.join(' ') + ruleNote, bad ? 'warn' : '');
+  // Each part is coloured like the row chips it describes: new (primary), likely in Wallet (tertiary, like "Likely in
+  // Wallet"), nearby date (tertiary), type differs (error), problems (amber).
+  const parts = [];
+  if (demo) parts.push(['DEMO DATA, nothing will be sent to Wallet.', 'warn']);
+  parts.push(fresh ? [`${fresh} new of ${txs.length} found.`, 'new'] : [`No new transactions among the ${txs.length} found.`, '']);
+  if (likely - mismatched - earlier) parts.push([`${likely - mismatched - earlier} look like they're already in Wallet (unticked).`, 'likely']);
+  if (earlier) parts.push([`${earlier} ${earlier === 1 ? 'is' : 'are'} in Wallet on a nearby date (unticked): "Use bank date" lines ${earlier === 1 ? 'it' : 'them'} up.`, 'likely']);
+  if (mismatched) parts.push([`${mismatched} match a Wallet record of the opposite type: use "Fix in Wallet" to correct it.`, 'check']);
+  if (ruleNote) parts.push([ruleNote.trim(), 'warn']);
+  setStatusParts(parts);
   render();
 }
 
@@ -484,15 +505,18 @@ function showCoverage(dates, allRecords) {
   const days = [...new Set(dates)];
   const empty = days.filter((d) => !perDay[d]);
   const range = dates[0] === dates.at(-1) ? shortDate(dates[0]) : `${shortDate(dates[0])} – ${shortDate(dates.at(-1))}`;
-  let msg = `Wallet has ${records.length} record${records.length === 1 ? '' : 's'} for ${range}.`;
-  if (!records.length) msg = `Wallet has no records for ${range}.`;
-  else if (empty.length) msg += ` Nothing yet on: ${empty.map(shortDate).join(', ')}.`;
-  else msg += ' Every date has at least one record.';
+  // what needs a look (dates with nothing, a sync still running) is amber; the rest stays muted
+  const parts = [];
+  if (!records.length) parts.push([`Wallet has no records for ${range}.`, 'warn']);
+  else {
+    parts.push([`Wallet has ${records.length} record${records.length === 1 ? '' : 's'} for ${range}.`, '']);
+    parts.push(empty.length ? [`Nothing yet on: ${empty.map(shortDate).join(', ')}.`, 'warn'] : ['Every date has at least one record.', '']);
+  }
   // Wallet's API serves a synced copy, so a record deleted in the app can still show here until it catches up.
   const { syncing, changedAt } = records.meta || {};
-  if (syncing) msg += ' Wallet is still syncing, so recent changes (such as deletions) may not show yet.';
-  else if (changedAt) msg += ` Wallet's data last changed ${new Date(changedAt).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`;
-  $('coverage').textContent = msg;
+  if (syncing) parts.push(['Wallet is still syncing, so recent changes (such as deletions) may not show yet.', 'warn']);
+  else if (changedAt) parts.push([`Wallet's data last changed ${new Date(changedAt).toLocaleString('en-MY', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.`, '']);
+  $('coverage').replaceChildren(...parts.flatMap(([text, kind], i) => [i ? ' ' : '', Object.assign(document.createElement('span'), { className: kind ? `s-${kind}` : '', textContent: text })]));
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -571,7 +595,7 @@ function rowFor(t) {
     const shown = `Wallet has this as ${t.match?.type || 'the other type'}, but the bank shows ${t.amount < 0 ? 'an expense' : 'income'}.`;
     if (t.match?.transfer) li.append(line('match unsure', `${shown} It's a transfer in Wallet, so fix it there.`));
     else {
-      li.append(line('match unsure', shown, button('Fix in Wallet', (e) => fixType([t], e.currentTarget),
+      li.append(line('match unsure', shown, button('Fix in Wallet', () => fixType([t]),
         { title: `Change the Wallet record's amount to ${fmt(t.amount)} so its type matches the bank. Category, note and labels are kept.` })));
     }
   } else if (t.likely && t.dateLag) {
@@ -579,15 +603,15 @@ function rowFor(t) {
     const days = Math.abs(t.dateLag);
     const when = `${days === 1 ? 'a day' : `${days} days`} ${t.dateLag > 0 ? 'earlier' : 'later'}, on ${shortDate(t.match.date)}`;
     li.append(line('match', `Wallet has this ${when}${note ? `: "${note}"` : ''}`,
-      button('Use bank date', (e) => moveDate([t], e.currentTarget), { title: `Move the Wallet record from ${shortDate(t.match.date)} to ${shortDate(t.date)} (the bank's date). Its time of day, note, category and labels are kept.` })));
+      button('Use bank date', () => moveDate([t]), { title: `Move the Wallet record from ${shortDate(t.match.date)} to ${shortDate(t.date)} (the bank's date). Its time of day, note, category and labels are kept.` })));
   } else if (t.likely) {
     const note = walletNote(t).trim();
     const becomes = (text) => `Wallet note becomes: "${text}". Amount, payer, category and labels are kept.`;
     const merge = canMerge(t)
-      ? [button('Merge notes', (e) => replace([t], e.currentTarget, { merge: true }), { title: becomes(mergedNote(note, t.desc)) })]
+      ? [button('Merge notes', () => replace([t], { merge: true }), { title: becomes(mergedNote(note, t.desc)) })]
       : [];
     li.append(line('match', note ? `Wallet note: "${note}"` : `In Wallet as: ${t.match?.desc || '(no description)'}`, ...merge,
-      button('Replace note', (e) => replace([t], e.currentTarget), { title: becomes(recordText(t).note) })));
+      button('Replace note', () => replace([t]), { title: becomes(recordText(t).note) })));
   }
   if (t.ignored) li.append(line('match', "Ignored: this row won't be synced.", button('Restore', () => setIgnored(t, false))));
   if (!fresh) return li;
@@ -604,7 +628,8 @@ function rowFor(t) {
     const how = t.rule?.manual ? ' (your choice)' : t.rule?.remembered ? ' (remembered)' : t.rule?.guessed ? ' (from similar past records)' : '';
     const labels = (t.rule?.labels || []).map((l) => l.name).filter(Boolean);
     const change = categories.length ? button('Change', () => { const s = categorySelect(t); change.replaceWith(s); s.focus(); }) : null;
-    li.append(line('match cat', `Category: ${name}${labels.length ? ` · ${labels.join(', ')}` : ''}${how}`, ...(change ? [change] : [])));
+    // no category: Wallet shows it as "Unknown expense", so it is amber to catch the eye before adding
+    li.append(line(t.rule?.category ? 'match cat' : 'match cat none', `Category: ${name}${labels.length ? ` · ${labels.join(', ')}` : ''}${how}`, ...(change ? [change] : [])));
   }
   const acts = document.createElement('span');
   acts.className = 'acts';
@@ -617,9 +642,24 @@ function rowFor(t) {
   return li;
 }
 
+// A row whose Wallet record is being edited (see queueEdits) shows only a spinner in place of its buttons; one whose
+// edit failed says why and offers its buttons again.
+function withEditState(li, t) {
+  if (t.editError) li.append(line('match unsure', `Couldn't update Wallet: ${t.editError}`));
+  const pending = pendingOf(t);
+  if (!pending) return li;
+  li.classList.add('editing');
+  li.querySelectorAll('button, input, select').forEach((el) => { el.disabled = true; });
+  const buttons = [...li.querySelectorAll('.match button')];
+  const working = button(pending, null, { cls: 'pending' });
+  working.disabled = true;
+  if (buttons.length) { buttons[0].before(working); buttons.forEach((b) => b.remove()); } else li.append(working);
+  return li;
+}
+
 function render() {
   $('results').hidden = false;
-  $('list').replaceChildren(...txs.map(rowFor));
+  $('list').replaceChildren(...txs.map((t) => withEditState(rowFor(t), t)));
   updateCount();
   updateBadge();
 }
@@ -647,99 +687,159 @@ function updateBadge() {
 
 function selected() { return txs.filter((t) => t.selected && !t.done && !t.ignored); }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Edits to existing Wallet records: Merge / Replace note, Fix in Wallet, Use bank date.
+// They don't lock the panel. Each click marks its row as working ("Merging…") and joins a queue, so the user can keep
+// clicking other rows. The queue sends what has gathered, up to 10 per request (the API's PATCH limit), one request
+// at a time, and updates each row as its result comes back. A page read asked for meanwhile waits for the queue.
+
+const editQueue = [];
+// signature -> { label: "Merging…" etc., n: edits queued or in flight }. By signature, not row object: a page read can
+// rebuild the rows at any moment, even between a click and the request. Counted, because two identical bank rows share
+// a signature and both can be queued.
+const editingSigs = new Map();
+let editing = false;
+const pendingOf = (t) => editingSigs.get(t.sig)?.label || '';
+const markEditing = (sig, label) => editingSigs.set(sig, { label, n: (editingSigs.get(sig)?.n || 0) + 1 });
+const unmarkEditing = (sig) => { const e = editingSigs.get(sig); if (e && --e.n <= 0) editingSigs.delete(sig); };
+const EDIT_GATHER_MS = 150; // quick clicks within this share a request
+
+const KINDS = {
+  merge: { label: 'Merging…', done: (n) => `Merged ${n} note${n === 1 ? '' : 's'}` },
+  replace: { label: 'Replacing…', done: (n) => `Replaced ${n} note${n === 1 ? '' : 's'}` },
+  fix: { label: 'Fixing…', done: (n) => `Fixed ${n} type${n === 1 ? '' : 's'}` },
+  move: { label: 'Moving…', done: (n) => `Moved ${n} record${n === 1 ? '' : 's'} to the bank's date` },
+};
+
+// `patch` is worked out now, from the row as clicked; `apply(row, patch)` updates the row once Wallet accepts it.
+function queueEdits(batch, kind, patch, apply) {
+  for (const t of batch) {
+    markEditing(t.sig, KINDS[kind].label);
+    t.editError = '';
+    // demo is fixed per edit: switching demo on or off while it waits must neither send a demo edit nor fake a real one
+    editQueue.push({ t, kind, patch: patch(t), apply, demo });
+  }
+  render();
+  drainEdits();
+}
+
+// A page read can rebuild the list while an edit is on its way; the result then belongs to the row that replaced it:
+// same signature and the same Wallet record (two identical bank rows can share a signature).
+const currentRow = (t) => (txs.includes(t) ? t : txs.find((x) => x.sig === t.sig && x.match?.id === t.match?.id));
+
+async function drainEdits() {
+  if (editing) return;
+  editing = true;
+  showProgress();
+  const tally = {}, failed = [];
+  let pretended = 0, stale = false, ownStatus = null;
+  // The queue's messages give way to others: an Add or a read that finishes meanwhile keeps its message.
+  const say = (msg, kind) => { setStatus(msg, kind); ownStatus = msg; };
+  const ours = () => ownStatus === null || $('status').textContent === ownStatus;
+  try {
+    await new Promise((r) => setTimeout(r, EDIT_GATHER_MS));
+    while (editQueue.length) {
+      // one request holds only real or only demo edits (in practice the queue never mixes them for long)
+      const fake = editQueue[0].demo;
+      const chunk = [];
+      while (chunk.length < 10 && editQueue.length && editQueue[0].demo === fake) chunk.push(editQueue.shift());
+      const left = chunk.length + editQueue.length;
+      if (ours()) say(`Updating ${left} Wallet record${left === 1 ? '' : 's'}…`);
+      let results;
+      try {
+        results = fake ? chunk.map(() => ({ success: true })) : await updateRecords(settings.token, chunk.map((e) => ({ id: e.t.match.id, ...e.patch })));
+      } catch (err) {
+        results = chunk.map(() => ({ success: false, error: err.message }));
+      }
+      chunk.forEach((e, i) => {
+        const r = results[i] || { success: false, error: 'No result returned' };
+        unmarkEditing(e.t.sig);
+        const t = currentRow(e.t);
+        // No row to update (a read replaced the list), or a read is running now with records fetched before this
+        // landed: either way the list may show the old state, so read again once everything settles.
+        if (!t || busy) stale = true;
+        if (!r.success) { if (t) t.editError = r.error; failed.push(r.error); return; }
+        if (t) e.apply(t, e.patch);
+        if (fake) pretended++; else tally[e.kind] = (tally[e.kind] || 0) + 1;
+      });
+      render();
+    }
+  } catch (err) {
+    failed.push(err.message);
+  } finally {
+    // whatever happened, nothing stays "working" and reads are not held back
+    for (const e of editQueue.splice(0)) unmarkEditing(e.t.sig);
+    editing = false;
+    showProgress();
+    const done = Object.entries(tally).map(([kind, n]) => KINDS[kind].done(n));
+    if (failed.length) setStatus(`${done.length ? `${done.join(', ')}. ` : ''}${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
+    else if (ours()) {
+      if (done.length) say(`${done.join(', ')} in Wallet.`, 'ok');
+      else say(`Demo: pretended to update ${pretended}. Nothing was sent.`);
+    }
+    if (tally.fix) refreshAccounts(true); // the balance changes when a sign flips
+    if (stale && !demo) rerun = { ...rerun, quiet: true, force: true };
+    if (!busy && rerun) { const next = rerun; rerun = null; setTimeout(() => readPage(next), 0); }
+    render();
+  }
+}
+
 // Gives the matched Wallet records the bank's description (in the note), so they show as "In Wallet" from now on.
 // Replace overwrites the note; merge keeps it and adds the description ("<your note> · <bank description>").
 // Only the note is patched: the amount already matched, and payer, category and labels stay as they are.
 const walletNote = (t) => t.match?.note ?? t.match?.desc ?? '';
-const canMerge = (t) => t.likely && !t.typeMismatch && !t.dateLag && Boolean(walletNote(t).trim()) && (demo || t.match?.id);
-async function replace(batch, button = null, { merge = false } = {}) {
-  batch = batch.filter((t) => t.likely && !t.typeMismatch && !t.dateLag && (demo || t.match?.id));
-  if (!batch.length || busy) return;
-  setBusy(true, { button, label: merge ? 'Merging…' : 'Replacing…' });
-  const what = (n) => `${merge ? 'Merged' : 'Replaced'} the note on ${n} Wallet record${n === 1 ? '' : 's'}`;
-  setStatus(`Updating ${batch.length} Wallet record${batch.length === 1 ? '' : 's'}…`);
-  const noteFor = (t) => (merge ? mergedNote(walletNote(t), t.desc) : recordText(t).note);
-  try {
-    const results = demo
-      ? batch.map(() => ({ success: true }))
-      : await updateRecords(settings.token, batch.map((t) => ({ id: t.match.id, note: noteFor(t) })));
-    const failed = [];
-    results.forEach((r, i) => { if (r.success) { Object.assign(batch[i], { done: true, likely: false, selected: false }); } else failed.push(r.error); });
-    render();
-    if (failed.length) setStatus(`${what(batch.length - failed.length)}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
-    else setStatus(demo ? `Demo: pretended to update ${batch.length}. Nothing was sent.` : `${what(batch.length)}.`);
-  } catch (e) { setStatus(e.message, 'error'); }
-  finally { setBusy(false); }
+const canReplace = (t) => t.likely && !t.typeMismatch && !t.dateLag && !pendingOf(t) && (demo || t.match?.id);
+const canMerge = (t) => canReplace(t) && Boolean(walletNote(t).trim());
+function replace(batch, { merge = false } = {}) {
+  batch = batch.filter(merge ? canMerge : canReplace);
+  if (!batch.length) return;
+  queueEdits(batch, merge ? 'merge' : 'replace',
+    (t) => ({ note: merge ? mergedNote(walletNote(t), t.desc) : recordText(t).note }),
+    (t) => Object.assign(t, { done: true, likely: false, selected: false }));
 }
 
-$('replaceAll').onclick = () => replace(txs.filter((t) => t.likely), $('replaceAll'));
-$('mergeAll').onclick = () => replace(txs.filter(canMerge), $('mergeAll'), { merge: true });
+$('replaceAll').onclick = () => replace(txs);
+$('mergeAll').onclick = () => replace(txs, { merge: true });
+
+// After a fix or a move the row is "In Wallet" if the descriptions agree, else still "Likely" (Merge/Replace offered).
+const afterEdit = (t) => {
+  const same = (t.match.texts || [t.match.desc]).some((x) => sameDescription(x, t.desc));
+  Object.assign(t, same ? { done: true, likely: false } : { likely: true }, { selected: false });
+};
 
 // Corrects a Wallet record saved with the wrong type (an expense recorded as income, or the other way round): its
-// amount is set to the bank's signed amount, which also sets the type. Only the amount changes. If the description
-// differs too, the row becomes "Likely in Wallet" so Replace is still offered for the note.
-const canFix = (t) => t.likely && t.typeMismatch && !t.match?.transfer && (demo || t.match?.id);
-async function fixType(batch, button = null) {
+// amount is set to the bank's signed amount, which also sets the type. Only the amount changes.
+const canFix = (t) => t.likely && t.typeMismatch && !t.match?.transfer && !pendingOf(t) && (demo || t.match?.id);
+function fixType(batch) {
   batch = batch.filter(canFix);
-  if (!batch.length || busy) return;
-  setBusy(true, { button, label: 'Fixing…' });
-  setStatus(`Fixing ${batch.length} Wallet record${batch.length === 1 ? '' : 's'}…`);
-  try {
-    const results = demo
-      ? batch.map(() => ({ success: true }))
-      : await updateRecords(settings.token, batch.map((t) => ({ id: t.match.id, amount: { value: t.amount } })));
-    const failed = [];
-    results.forEach((r, i) => {
-      const t = batch[i];
-      if (!r.success) return failed.push(r.error);
-      t.match = { ...t.match, type: t.amount < 0 ? 'expense' : 'income' };
-      t.typeMismatch = false;
-      const same = (t.match.texts || [t.match.desc]).some((x) => sameDescription(x, t.desc));
-      Object.assign(t, same ? { done: true, likely: false } : { likely: true }, { selected: false });
-    });
-    render();
-    if (failed.length) setStatus(`Fixed ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
-    else setStatus(demo ? `Demo: pretended to fix ${batch.length}. Nothing was sent.` : `Fixed ${batch.length} in Wallet.`);
-    if (!demo && failed.length < batch.length) refreshAccounts(true); // the balance changes when a sign flips
-  } catch (e) { setStatus(e.message, 'error'); }
-  finally { setBusy(false); }
+  if (!batch.length) return;
+  queueEdits(batch, 'fix', (t) => ({ amount: { value: t.amount } }), (t) => {
+    t.match = { ...t.match, type: t.amount < 0 ? 'expense' : 'income' };
+    t.typeMismatch = false;
+    afterEdit(t);
+  });
 }
 
-$('fixAll').onclick = () => fixType(txs.filter(canFix), $('fixAll'));
+$('fixAll').onclick = () => fixType(txs);
 
 // Moves a Wallet record dated a few days before or after the bank's row (logged before the bank posted it, or an
-// automated/scheduled record) to the bank's date, keeping its time of day, so the two line up. Only the date changes. If the description differs too, the row then offers Merge / Replace.
-const canMove = (t) => t.likely && t.dateLag && (demo || t.match?.id);
+// automated/scheduled record) to the bank's date, keeping its time of day, so the two line up. Only the date changes.
+const canMove = (t) => t.likely && t.dateLag && !pendingOf(t) && (demo || t.match?.id);
 const movedDate = (t) => new Date(Date.parse(t.match.recordDate || `${t.match.date}T12:00:00+08:00`) + t.dateLag * 864e5).toISOString();
-async function moveDate(batch, button = null) {
+function moveDate(batch) {
   batch = batch.filter(canMove);
-  if (!batch.length || busy) return;
-  setBusy(true, { button, label: 'Moving…' });
-  setStatus(`Moving ${batch.length} Wallet record${batch.length === 1 ? '' : 's'} to the bank's date…`);
-  try {
-    const results = demo
-      ? batch.map(() => ({ success: true }))
-      : await updateRecords(settings.token, batch.map((t) => ({ id: t.match.id, recordDate: movedDate(t) })));
-    const failed = [];
-    results.forEach((r, i) => {
-      const t = batch[i];
-      if (!r.success) return failed.push(r.error);
-      t.match = { ...t.match, date: t.date, recordDate: movedDate(t) };
-      t.dateLag = 0;
-      const same = (t.match.texts || [t.match.desc]).some((x) => sameDescription(x, t.desc));
-      Object.assign(t, same ? { done: true, likely: false } : { likely: true }, { selected: false });
-    });
-    render();
-    if (failed.length) setStatus(`Moved ${batch.length - failed.length}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
-    else setStatus(demo ? `Demo: pretended to move ${batch.length}. Nothing was sent.` : `Moved ${batch.length} Wallet record${batch.length === 1 ? '' : 's'} to the bank's date.`);
-  } catch (e) { setStatus(e.message, 'error'); }
-  finally { setBusy(false); }
+  if (!batch.length) return;
+  queueEdits(batch, 'move', (t) => ({ recordDate: movedDate(t) }), (t, { recordDate }) => {
+    t.match = { ...t.match, date: t.date, recordDate };
+    t.dateLag = 0;
+    afterEdit(t);
+  });
 }
 
-$('moveAll').onclick = () => moveDate(txs.filter(canMove), $('moveAll'));
+$('moveAll').onclick = () => moveDate(txs);
 
 function updateCount() {
-  const likely = txs.filter((t) => t.likely && !t.typeMismatch && !t.dateLag).length;
+  const likely = txs.filter(canReplace).length;
   $('replaceAll').hidden = !likely;
   const movable = txs.filter(canMove).length;
   $('moveAll').hidden = movable < 2; // one is moved from its own row; the bulk button is for several
@@ -828,7 +928,7 @@ $('sync').onclick = async () => {
     }
     const added = batch.length - failed.length;
     if (failed.length) setStatus(`Added ${added}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
-    else setStatus(demo ? `Demo: pretended to add ${added}. Nothing was sent.` : `Added ${added} to Wallet. You can undo this for 15 minutes.`);
+    else setStatus(demo ? `Demo: pretended to add ${added}. Nothing was sent.` : `Added ${added} to Wallet. You can undo this for 15 minutes.`, demo ? '' : 'ok');
     if (!demo && added) refreshAccounts(true);
   } catch (e) { setStatus(e.message, 'error'); }
   finally { setBusy(false); }
@@ -855,7 +955,7 @@ $('undo').onclick = async () => {
     } else {
       lastAdd = null;
       if (!wasDemo) save({ lastAdd: null });
-      setStatus(wasDemo ? 'Demo: pretended to undo. Nothing was sent.' : `Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'} from Wallet.`);
+      setStatus(wasDemo ? 'Demo: pretended to undo. Nothing was sent.' : `Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'} from Wallet.`, wasDemo ? '' : 'ok');
       if (wasDemo) txs.forEach((t) => { if (t.done && !t.match) { t.done = false; t.selected = true; } });
     }
     showUndo();

@@ -14,18 +14,29 @@
   .account-info p { margin: 0; }
   #account { font-weight: 500; letter-spacing: .1px; color: var(--md-on-surface); }
   select.acct { width: 100%; padding: 6px 10px; font-weight: 500; letter-spacing: .1px; border: 1px solid var(--md-outline); border-radius: 8px; background-color: var(--md-surface); color: var(--md-on-surface); }
-  #bank { font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* a long account name is shortened with "…" but the last digits always stay visible; the full text is the tooltip */
+  #bank { display: flex; gap: 4px; font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); white-space: nowrap; }
+  #bankLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  #bankDigits { flex: none; }
   #balance { font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-secondary); font-weight: 500; }
   .access { margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: var(--md-surface-container-high); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
   .access p { margin: 0 0 8px; }
   .reconcile { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); }
-  .reconcile.off span { color: var(--warn); }
+  .verdict { font-weight: 500; }
+  .verdict.ok { color: var(--credit); }
+  .verdict.off { color: var(--warn); }
+  /* the summary above the list, coloured like the row chips it counts */
+  .s-new { color: var(--md-primary); font-weight: 500; }
+  .s-likely { color: var(--md-tertiary); }
+  .s-check { color: var(--md-error); }
+  .s-warn { color: var(--warn); }
   .reconcile button { flex: none; }
   .adjust-confirm { margin: 6px 0; padding: 10px 12px; border-radius: 12px; background: var(--md-surface-container-high); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
   .adjust-confirm p { margin: 0 0 8px; }
   .adjust-actions { display: flex; gap: 8px; }
   .date { color: var(--md-secondary); }
   .cat { color: var(--md-tertiary); }
+  .cat.none { color: var(--warn); }
   .unsure { color: var(--md-error); }
   .actions { display: flex; gap: 8px; margin-top: 12px; }
   .actions .grow { flex: 1; }
@@ -51,6 +62,11 @@
   .amt.neg { color: var(--md-error); } .amt.pos { color: var(--credit); }
   .amt.xfer { color: var(--md-tertiary); } /* a transfer is neither spending nor income */
   .bar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+  /* A long list scrolls between the two: the select-all bar with the bulk buttons stays at the top and
+     "Add to Wallet" at the bottom of the panel. They span the body's 14px padding so rows don't show beside them. */
+  #results > .bar { position: sticky; top: 0; z-index: 1; margin: 4px -14px 0; padding: 6px 14px; background: var(--md-surface); border-bottom: 1px solid var(--md-outline-variant); }
+  #results > .actions { position: sticky; bottom: 0; z-index: 1; margin: 0 -14px; padding: 10px 14px 14px; background: var(--md-surface); border-top: 1px solid var(--md-outline-variant); }
+  #results > #list { border-top: 0; }
   pre { max-height: 220px; overflow: auto; font-size: 13px; background: var(--md-surface-container-high); padding: 12px; border-radius: 12px; }
   /* busy state (see setBusy in popup.js): an M3 indeterminate linear progress bar, a spinner on the pressed button,
      and the rest of the panel dimmed and inert while a user-started action runs */
@@ -78,7 +94,7 @@
   <div class="account-info">
     <select id="accountSelect" class="acct" aria-label="Wallet account to add to" hidden></select>
     <p id="account">No account set</p>
-    <p id="bank" hidden></p>
+    <p id="bank" hidden><span id="bankLabel"></span><span id="bankDigits"></span></p>
     <p id="balance" hidden></p>
     <div class="reconcile" id="reconcile" hidden>
       <span id="reconcileText"></span>

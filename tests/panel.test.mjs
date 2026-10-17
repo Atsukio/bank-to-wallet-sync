@@ -22,6 +22,172 @@ const settle = (ms = 700) => wait(ms);
   await page.close();
 }
 
+// ---------------------------------------------------------------- the "Reading:" line with a long account name
+{
+  const { page } = await open({ bank: { label: 'Example Bank Everyday Savings Account-i With A Very Long Product Name 1234 5678 9012', digits: '9012' } });
+  await settle();
+  const got = await page.evaluate(() => {
+    const p = document.getElementById('bank').getBoundingClientRect(), d = document.getElementById('bankDigits').getBoundingClientRect();
+    const label = document.getElementById('bankLabel');
+    return {
+      text: document.getElementById('bank').textContent, title: document.getElementById('bank').title,
+      digitsInside: d.width > 0 && d.right <= p.right + 0.5, oneLine: p.height <= 21,
+      cut: label.scrollWidth > label.clientWidth && getComputedStyle(label).textOverflow === 'ellipsis',
+    };
+  });
+  check('Reading line: a long name is cut with "…" but the last digits stay visible, on one line', got.cut && got.digitsInside && got.oneLine && got.text.endsWith('••9012'), JSON.stringify(got));
+  check('Reading line: the full account number is left out (only the masked last four show), and the tooltip has the whole name', !got.text.includes('5678') && got.title === 'Reading: Example Bank Everyday Savings Account-i With A Very Long Product Name ••9012', JSON.stringify(got));
+  await page.close();
+}
+
+// ---------------------------------------------------------------- row edits queue up instead of locking the panel
+{
+  const rec = (id, date, amount, note) => ({ id, accountId: 'a1', recordDate: `${date}T04:00:00Z`, amount: { value: amount }, recordType: 'expense', note });
+  const { page } = await open({
+    delay: 600,
+    rows: [{ date: '2026-10-01', desc: 'FIRST SHOP', amount: -10 }, { date: '2026-10-02', desc: 'SECOND SHOP', amount: -20 }, { date: '2026-10-03', desc: 'THIRD SHOP', amount: -30 }, { date: '2026-10-04', desc: 'BRAND NEW', amount: -5 }],
+    records: [rec('q1', '2026-10-01', -10, 'One'), rec('q2', '2026-10-02', -20, 'Two'), rec('q3', '2026-10-03', -30, 'Three')],
+  });
+  await settle();
+  const press = (desc, label) => page.evaluate((d, l) => [...document.querySelectorAll('#list li')].find((li) => li.querySelector('.desc').textContent === d).querySelectorAll('button').forEach((b) => { if (b.textContent === l) b.click(); }), desc, label);
+  await press('FIRST SHOP', 'Merge notes');
+  await press('SECOND SHOP', 'Replace note');
+  await wait(400); // the first request is on its way
+  check('queue: while an edit is on its way the panel is not locked', await page.evaluate(() => !document.getElementById('app').inert));
+  await press('THIRD SHOP', 'Merge notes');
+  await page.click('#sync');
+  await wait(100);
+  check('queue: Add can be pressed while edits are still running', (await text(page, '#sync')) === 'Adding…', await text(page, '#sync'));
+  await wait(2500);
+  const patched = await log(page, 'patched');
+  check('queue: clicks close together share one request, a later one goes in the next',
+    JSON.stringify(patched) === JSON.stringify([[{ id: 'q1', note: 'One · FIRST SHOP' }, { id: 'q2', note: 'SECOND SHOP' }], [{ id: 'q3', note: 'Three · THIRD SHOP' }]]), JSON.stringify(patched));
+  check('queue: Add ran alongside and every row ends up done', (await log(page, 'created')).length === 1 && await page.evaluate(() => !document.querySelector('#list li.editing') && document.getElementById('progress').hidden));
+  await page.close();
+}
+{
+  const { page } = await open({
+    rows: [{ date: '2026-10-01', desc: 'FAILING SHOP', amount: -10 }],
+    records: [{ id: 'bad', accountId: 'a1', recordDate: '2026-10-01T04:00:00Z', amount: { value: -10 }, recordType: 'expense', note: 'Mine' }],
+  });
+  await settle();
+  await page.evaluate(() => { window.__t.env.patchFails = true; [...document.querySelectorAll('#list button')].find((b) => b.textContent === 'Replace note').click(); });
+  await settle();
+  check('queue: a failed edit says why on its row and offers the button again',
+    (await text(page, '#list li')).includes("Couldn't update Wallet") && await page.evaluate(() => [...document.querySelectorAll('#list button')].some((b) => b.textContent === 'Replace note' && !b.disabled)) && (await page.evaluate(() => document.getElementById('status').className)) === 'status error');
+  await page.close();
+}
+
+{
+  // an edit clicked while a page read is fetching Wallet: the rebuilt row keeps "working" and gets the result
+  const row = { date: '2026-10-01', desc: 'RACE SHOP', amount: -10 };
+  const { page } = await open({ delay: 1500, rows: [row], records: [{ id: 'race', accountId: 'a1', recordDate: '2026-10-01T04:00:00Z', amount: { value: -10 }, recordType: 'expense', note: 'Mine' }] });
+  await settle();
+  await page.evaluate(() => { window.__t.env.readDelay = 700; window.__fire('activated', {}); }); // a forced read starts, Wallet is slow
+  await wait(150);
+  await page.evaluate(() => [...document.querySelectorAll('#list button')].find((b) => b.textContent === 'Replace note').click());
+  await wait(900); // the read has rebuilt the list from records fetched before the edit; the edit is still on its way
+  check('race: a row rebuilt by a read while its edit is in flight stays "working", with no buttons to press again',
+    await page.evaluate(() => !!document.querySelector('#list li.editing') && ![...document.querySelectorAll('#list button')].some((b) => b.textContent === 'Replace note' && !b.disabled)));
+  await wait(1500);
+  check('race: when the edit lands the rebuilt row is shown as done, and only one request was sent',
+    (await log(page, 'patched')).length === 1 && await page.evaluate(() => !document.querySelector('#list li.editing') && document.querySelector('#list li').classList.contains('done')));
+  await page.close();
+}
+{
+  // the edit lands while a read is still waiting on Wallet data fetched before it: the panel reads again afterwards
+  const { page } = await open({ delay: 100, rows: [{ date: '2026-10-01', desc: 'LATE READ SHOP', amount: -10 }], records: [{ id: 'late', accountId: 'a1', recordDate: '2026-10-01T04:00:00Z', amount: { value: -10 }, recordType: 'expense', note: 'Mine' }] });
+  await settle();
+  await page.evaluate(() => { window.__t.env.readDelay = 1200; window.__fire('activated', {}); });
+  await wait(150);
+  await page.evaluate(() => {
+    [...document.querySelectorAll('#list button')].find((b) => b.textContent === 'Replace note').click();
+    window.__t.env.records = window.__t.env.records.map((r) => ({ ...r, note: 'LATE READ SHOP' })); // Wallet now has the new note
+  });
+  await wait(1300); // the slow read finishes with the old records
+  await page.evaluate(() => { window.__t.env.readDelay = 0; });
+  await wait(1200); // the follow-up read
+  check('stale read: an edit that lands during a read triggers one more read, so the row ends up "In Wallet"',
+    await page.evaluate(() => document.querySelector('#list li').classList.contains('done') && !document.querySelector('#list li.editing') && document.getElementById('progress').hidden));
+  await page.close();
+}
+{
+  // two identical bank rows edited in different requests: the second stays "working" until its own result
+  const rec = (id, date, amount, note) => ({ id, accountId: 'a1', recordDate: `${date}T04:00:00Z`, amount: { value: amount }, recordType: 'expense', note });
+  const shops = Array.from({ length: 9 }, (_, i) => ({ date: `2026-10-0${i + 1}`, desc: `SHOP ${i}`, amount: -(i + 1) }));
+  const twin = { date: '2026-10-09', desc: 'TWIN CAFE', amount: -50 };
+  const { page } = await open({
+    delay: 800,
+    rows: [...shops, twin, twin],
+    records: [...shops.map((r, i) => rec(`s${i}`, r.date, r.amount, `note ${i}`)), rec('t1', twin.date, -50, 'coffee one'), rec('t2', twin.date, -50, 'coffee two')],
+  });
+  await settle();
+  await page.click('#replaceAll');
+  await wait(1100); // the first request (10 edits, one twin) is done, the second (the other twin) is on its way
+  const mid = await page.evaluate(() => [...document.querySelectorAll('#list li')].filter((li) => li.querySelector('.desc').textContent === 'TWIN CAFE')
+    .map((li) => li.classList.contains('done') || li.classList.contains('editing')));
+  check('twins: after the first request, each identical row is either done or still "working", none offers Replace again',
+    mid.length === 2 && mid.every(Boolean) && !(await page.evaluate(() => [...document.querySelectorAll('#list button')].some((b) => b.textContent === 'Replace note' && !b.disabled))), JSON.stringify(mid));
+  await wait(1200);
+  check('twins: both end up done, each record patched once', JSON.stringify((await log(page, 'patched')).map((p) => p.length)) === '[10,1]' && await page.evaluate(() => [...document.querySelectorAll('#list li')].every((li) => li.classList.contains('done'))));
+  await page.close();
+}
+{
+  // demo mode is decided when an edit is clicked, not when it is sent
+  const { page } = await open({ tabUrl: 'https://example.com/', delay: 300 });
+  await settle();
+  await page.click('#demo'); await settle();
+  await page.evaluate(() => [...document.querySelectorAll('#list button')].find((b) => b.textContent === 'Replace note').click());
+  await page.click('#exitDemo'); // within the gather window
+  await wait(900);
+  check('demo switch: a demo edit still waiting when demo is left is never sent to Wallet', (await log(page, 'patched')).length === 0, JSON.stringify(await log(page, 'patched')));
+  await page.close();
+}
+{
+  const { page } = await open({ delay: 300, rows: [{ date: '2026-10-01', desc: 'REAL SHOP', amount: -10 }], records: [{ id: 'real1', accountId: 'a1', recordDate: '2026-10-01T04:00:00Z', amount: { value: -10 }, recordType: 'expense', note: 'Mine' }] });
+  await settle();
+  await page.evaluate(() => [...document.querySelectorAll('#list button')].find((b) => b.textContent === 'Replace note').click());
+  await page.click('#demo'); // within the gather window
+  await wait(900);
+  check('demo switch: a real edit still waiting when demo is entered is still sent', JSON.stringify(await log(page, 'patched')) === JSON.stringify([[{ id: 'real1', note: 'REAL SHOP' }]]), JSON.stringify(await log(page, 'patched')));
+  await page.close();
+}
+
+// ---------------------------------------------------------------- colour coding
+{
+  const { page } = await open({ rows: [{ date: '2026-10-01', desc: 'NO CATEGORY SHOP', amount: -10 }, { date: '2026-10-03', desc: 'ANOTHER SHOP', amount: -5 }] });
+  await settle();
+  const got = await page.evaluate(() => ({
+    none: !!document.querySelector('#list li .cat.none'),
+    gap: document.querySelector('#coverage .s-warn')?.textContent || '',
+    fresh: document.querySelector('#status .s-new')?.textContent || '',
+  }));
+  check('colours: a row with no category is flagged, the dates Wallet has nothing for are amber, the new count is highlighted',
+    got.none && got.gap.startsWith('Wallet has no records') && got.fresh.includes('new of 2'), JSON.stringify(got));
+  await page.click('#sync'); await settle();
+  check('colours: a successful add is shown in green', (await page.evaluate(() => document.getElementById('status').className)) === 'status ok' && (await text(page, '#status')).startsWith('Added 2'), await text(page, '#status'));
+  await page.close();
+}
+
+// ---------------------------------------------------------------- a long list keeps the main buttons in reach
+{
+  const many = Array.from({ length: 60 }, (_, i) => ({ date: `2026-09-${String(1 + (i % 28)).padStart(2, '0')}`, desc: `SHOP NUMBER ${i}`, amount: -(i + 1) }));
+  const { page } = await open({ rows: many });
+  await settle(900);
+  const reachable = () => page.evaluate(() => ['toggleAll', 'compare', 'sync'].map((id) => {
+    const r = document.getElementById(id).getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return r.top >= 0 && r.bottom <= window.innerHeight && (hit === document.getElementById(id) || document.getElementById(id).contains(hit) || hit?.contains(document.getElementById(id)));
+  }));
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight / 2));
+  const middle = await reachable();
+  check('long list: in the middle, the select-all bar (with the bulk buttons) and "Add to Wallet" stay on screen and clickable', middle.every(Boolean), JSON.stringify(middle));
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  const end = await page.evaluate(() => { const last = document.querySelector('#list li:last-child').getBoundingClientRect(), add = document.getElementById('sync').getBoundingClientRect(); return last.bottom <= add.top; });
+  check('long list: at the end the last row sits above "Add to Wallet", not under it', end);
+  await page.close();
+}
+
 // ---------------------------------------------------------------- account mapping per bank account
 {
   const bank = { label: 'Maybank Shopee Visa Platinum Credit Card', digits: '9876' };
@@ -236,7 +402,7 @@ const settle = (ms = 700) => wait(ms);
   await page.click('#demo'); await settle();
   const r = await rows(page);
   check('demo: shows rows, a transfer, an opposite-type warning and a guessed category', r.length >= 12 && r.some((x) => x.chips.includes('Transfer')) && r.some((x) => x.chips.includes('Type differs')) && r.some((x) => x.lines.join(' ').includes('similar past records')));
-  await page.evaluate(() => [...document.querySelectorAll('#list li')].find((li) => li.querySelector('.desc').textContent.startsWith('NETFLIX')).querySelector('.acts button:last-child').click()); await settle();
+  await page.evaluate(() => [...document.querySelectorAll('#list li')].find((li) => li.querySelector('.desc').textContent.startsWith('STREAMFLIX')).querySelector('.acts button:last-child').click()); await settle();
   await page.click('#sync'); await settle();
   check('demo: Add pretends and Undo is offered', (await text(page, '#status')).startsWith('Demo: pretended') && await visible(page, '#undo'));
   await page.click('#undo'); await settle();
@@ -409,14 +575,14 @@ const settle = (ms = 700) => wait(ms);
   check('busy: idle panel has no progress bar and nothing locked', JSON.stringify(await state()) === JSON.stringify({ bar: false, locked: false, pending: [] }));
 
   await page.evaluate(() => { const b = [...document.querySelectorAll('#list button')].find((x) => x.textContent === 'Replace note'); b.click(); b.click(); });
-  await wait(150);
+  await wait(100);
   let s = await state();
-  check('replace: progress bar, "Replacing…" with a spinner, panel locked', s.bar && s.locked && s.pending[0] === 'Replacing…', JSON.stringify(s));
-  await page.click('#sync').catch(() => {});
-  await wait(800);
-  check('replace: a double click sends one request, and Add was not pressable meanwhile', (await log(page, 'patched')).length === 1 && (await log(page, 'created')).length === 0);
+  check('replace: progress bar and "Replacing…" on that row, but the panel stays usable', s.bar && !s.locked && s.pending[0] === 'Replacing…', JSON.stringify(s));
+  check('replace: the row being edited has no other buttons to press', await page.evaluate(() => [...document.querySelector('#list li.editing').querySelectorAll('button')].every((b) => b.disabled)));
+  await wait(900);
+  check('replace: a double click sends one request', (await log(page, 'patched')).length === 1);
   s = await state();
-  check('replace: afterwards the bar is gone and the panel unlocked', !s.bar && !s.locked && !s.pending.length, JSON.stringify(s));
+  check('replace: afterwards the bar is gone and the row is in Wallet', !s.bar && !s.pending.length && (await text(page, '#status')).startsWith('Replaced 1 note'), JSON.stringify(s));
 
   await page.click('#sync'); await wait(150);
   s = await state();
@@ -455,7 +621,7 @@ const settle = (ms = 700) => wait(ms);
   await settle();
   check('before demo: the real accounts are listed', await accountsOf(page) === 'Savings|Credit card');
   await page.click('#demo'); await settle();
-  check('demo: fake accounts, a demo banner, and the button offers to exit', (await accountsOf(page)).includes('Maybank Visa Platinum') && await visible(page, '#demoBar') && await text(page, '#demo') === 'Exit demo');
+  check('demo: fake accounts, a demo banner, and the button offers to exit', (await accountsOf(page)).includes('Visa Credit Card') && await visible(page, '#demoBar') && await text(page, '#demo') === 'Exit demo');
   await page.click('#exitDemo'); await settle(900);
   check('exit demo: the real accounts and balance are back', await accountsOf(page) === 'Savings|Credit card' && (await text(page, '#balance')).includes('1,234.50'));
   check('exit demo: banner gone, button reads "Demo data" again', !(await visible(page, '#demoBar')) && await text(page, '#demo') === 'Demo data');

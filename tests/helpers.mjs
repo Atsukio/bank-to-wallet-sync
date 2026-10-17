@@ -80,6 +80,8 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
       t.fetches.push(`${method} ${u.replace('https://rest.budgetbakers.com/wallet/v1/api', '')}`);
       const body = opts.body ? JSON.parse(opts.body) : null;
       if (method !== 'GET' && t.env.delay) await new Promise((r) => setTimeout(r, t.env.delay)); // slow writes, for the busy-state tests
+      // slow record reads, for an edit clicked while a read is under way; the records are those at the time of the request
+      if (method === 'GET' && u.includes('/records') && t.env.readDelay) { const snapshot = t.env.records; await new Promise((r) => setTimeout(r, t.env.readDelay)); return json({ records: snapshot }); }
       if (u.includes('/accounts')) return json({ accounts: t.env.accounts });
       if (u.includes('/record-rules')) return json({ recordRules: t.env.rules });
       if (u.includes('/categories')) return json({ categories: t.env.categories });
@@ -94,7 +96,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
           return json({ results });
         }
         if (method === 'DELETE') { t.deleted.push(body.ids); return json({ results: body.ids.map((id, i) => ({ inputIndex: i, id, success: true })) }); }
-        if (method === 'PATCH') { t.patched.push(body); return json({ results: body.map((_, i) => ({ inputIndex: i, success: true })) }); }
+        if (method === 'PATCH') { t.patched.push(body); return json({ results: body.map((_, i) => (t.env.patchFails ? { inputIndex: i, success: false, error: 'Record not found' } : { inputIndex: i, success: true })) }); }
         return json({ records: t.env.records });
       }
       return { ok: false, status: 404, headers: new Headers(), json: async () => ({ message: 'not found' }) };

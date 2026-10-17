@@ -73,7 +73,7 @@ async function renderBanks() {
     li.append(`${bank.name}, ${bank.country}`);
     if (!bank.optional) return li;
     const allowed = await hasAccess(bank);
-    const state = Object.assign(document.createElement('span'), { className: 'muted', textContent: allowed ? ' (allowed)' : ' (needs your permission)' });
+    const state = Object.assign(document.createElement('span'), { className: allowed ? 'access-ok' : 'access-needed', textContent: allowed ? ' (allowed)' : ' (needs your permission)' });
     const button = Object.assign(document.createElement('button'), { className: 'text', textContent: allowed ? 'Remove access' : 'Allow' });
     button.onclick = async () => {
       if (allowed) await chrome.permissions.remove({ origins: [bank.origin] }).catch(() => {});

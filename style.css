@@ -102,6 +102,7 @@ a { color: var(--md-primary); }
 .status { min-height: 24px; margin: 8px 0; }
 .status.error { color: var(--md-error); }
 .status.warn { color: var(--warn); }
+.status.ok { color: var(--credit); }
 
 /* "What's new" card after an update (whatsnew.js): stands out from the settings, stays compact. */
 .whats-new { margin: 8px 0 12px; padding: 12px 12px 4px 16px; border-radius: 12px; background: var(--md-secondary-container); color: var(--md-on-secondary-container); font-size: 14px; line-height: 20px; letter-spacing: .25px; }

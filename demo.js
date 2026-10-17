@@ -1,4 +1,5 @@
-// Synthetic data for trying the popup without a Maybank login or a Wallet token. Nothing here is real.
+// Synthetic data for trying the popup without a bank login or a Wallet token. Nothing here is real, and the names are
+// deliberately generic and made up (no real merchants, places, people or bank products).
 // `wallet` says how the fake Wallet already knows each row:
 //   'same'   = already there with the identical description
 //   'manual' = entered by hand with a different description (date + amount match only)
@@ -8,27 +9,27 @@
 //   'earlier'  = entered a day before the bank posted it (card purchases often post a day later)
 //   absent   = genuinely new
 export const DEMO_TXS = [
-  { date: '2026-10-01', desc: 'GRAB* A-4F2K9 KUALA LUMPUR MY', amount: -18.5, wallet: 'same' },
-  { date: '2026-10-01', desc: 'SALARY ACME SDN BHD OCT', amount: 4200, wallet: 'same' },
-  { date: '2026-10-02', desc: 'TESCO EXTRA CHERAS', amount: -86.4, wallet: 'exact' },
-  { date: '2026-10-02', desc: 'MCDONALDS PAVILION KL', amount: -23.9, wallet: 'manual', walletDesc: 'Lunch' },
-  { date: '2026-10-04', desc: 'TNG EWALLET RELOAD', amount: -50, wallet: 'manual', walletDesc: 'TNG' },
-  { date: '2026-10-04', desc: 'STARBUCKS MID VALLEY', amount: -5, wallet: 'same' },
-  { date: '2026-10-04', desc: 'STARBUCKS MID VALLEY', amount: -5 },
-  { date: '2026-10-06', desc: 'TENAGA NASIONAL BERHAD BILL', amount: -142.7 },
-  { date: '2026-10-06', desc: 'IBG TRANSFER FROM JANE TAN', amount: 300 },
-  { date: '2026-10-08', desc: 'SHOPEE MALAYSIA ORDER 88231', amount: -64.9, wallet: 'same' },
-  { date: '2026-10-09', desc: 'PETRONAS SETIA ALAM SELANGOR MY', amount: -70, wallet: 'cut' },
-  { date: '2026-10-09', desc: 'XCORE FITNESS-E24 :009/024', amount: -249.96, wallet: 'wrongtype' },
-  { date: '2026-10-08', desc: 'BOOST JUICE AEON KUCHING MY', amount: -19.5, wallet: 'earlier', walletDesc: 'Juice' },
-  { date: '2026-10-10', desc: 'SPAYLATER REPAYMENT-EC SPKUALA LUMPUR MY', amount: -3131.27 },
-  { date: '2026-10-10', desc: 'NETFLIX.COM', amount: -55 },
+  { date: '2026-10-01', desc: 'RIDE SHARE TRIP A-4F2K9', amount: -18.5, wallet: 'same' },
+  { date: '2026-10-01', desc: 'SALARY EXAMPLE CO OCT', amount: 4200, wallet: 'same' },
+  { date: '2026-10-02', desc: 'FRESHMART SUPERMARKET', amount: -86.4, wallet: 'exact' },
+  { date: '2026-10-02', desc: 'BURGER CORNER CITY MALL', amount: -23.9, wallet: 'manual', walletDesc: 'Lunch' },
+  { date: '2026-10-04', desc: 'EWALLET TOP UP', amount: -50, wallet: 'manual', walletDesc: 'E-wallet' },
+  { date: '2026-10-04', desc: 'CORNER CAFE MAIN STREET', amount: -5, wallet: 'same' },
+  { date: '2026-10-04', desc: 'CORNER CAFE MAIN STREET', amount: -5 },
+  { date: '2026-10-06', desc: 'ELECTRICITY BILL PAYMENT', amount: -142.7 },
+  { date: '2026-10-06', desc: 'TRANSFER FROM JANE DOE', amount: 300 },
+  { date: '2026-10-08', desc: 'ONLINE STORE ORDER 88231', amount: -64.9, wallet: 'same' },
+  { date: '2026-10-09', desc: 'FUEL STATION RIVERSIDE BRANCH', amount: -70, wallet: 'cut' },
+  { date: '2026-10-09', desc: 'GYM MEMBERSHIP-E24 :009/024', amount: -249.96, wallet: 'wrongtype' },
+  { date: '2026-10-08', desc: 'JUICE BAR CENTRAL PARK', amount: -19.5, wallet: 'earlier', walletDesc: 'Juice' },
+  { date: '2026-10-10', desc: 'CREDIT CARD REPAYMENT ONLINE', amount: -3131.27 },
+  { date: '2026-10-10', desc: 'STREAMFLIX SUBSCRIPTION', amount: -55 },
 ];
 
 // Fake Wallet accounts, shaped like GET /accounts (the demo "bank account" is the first).
 export const DEMO_ACCOUNTS = [
-  { id: 'demo-savings', name: 'Maybank Savings', currencyCode: 'MYR', balance: { currentBalance: 3482.1, currencyCode: 'MYR' } },
-  { id: 'demo-card', name: 'Maybank Visa Platinum', currencyCode: 'MYR', balance: { currentBalance: -12252.42, currencyCode: 'MYR' } },
+  { id: 'demo-savings', name: 'Everyday Savings', currencyCode: 'MYR', balance: { currentBalance: 3482.1, currencyCode: 'MYR' } },
+  { id: 'demo-card', name: 'Visa Credit Card', currencyCode: 'MYR', balance: { currentBalance: -12252.42, currencyCode: 'MYR' } },
   { id: 'demo-cash', name: 'Cash', currencyCode: 'MYR', balance: { currentBalance: 120, currencyCode: 'MYR' } },
 ];
 
@@ -52,20 +53,20 @@ export const DEMO_TRANSFER_RULES = [{ keyword: 'repayment', accountId: 'demo-car
 // Wallet records that match nothing above, so the list of existing records isn't only the ones we expect.
 const DEMO_OTHER = [
   { date: '2026-10-06', amount: 9.9, type: 'expense', desc: 'Parking' },
-  { date: '2026-10-08', amount: 12, type: 'expense', desc: 'Teh tarik' },
+  { date: '2026-10-08', amount: 12, type: 'expense', desc: 'Coffee' },
 ];
 
 // Fake Wallet categorisation rules, shaped like GET /record-rules.
 export const DEMO_RULES = [
-  { keywords: ['grab', 'petronas'], category: { id: 'demo-transport', name: 'Transportation' } },
-  { keywords: ['tesco', 'starbucks', 'mcdonalds'], category: { id: 'demo-food', name: 'Food & Drinks' } },
-  { keywords: ['tenaga'], category: { id: 'demo-bills', name: 'Bills & Utilities' }, labels: [{ id: 'demo-home', name: 'Home' }] },
+  { keywords: ['ride share', 'fuel station'], category: { id: 'demo-transport', name: 'Transportation' } },
+  { keywords: ['freshmart', 'cafe', 'burger'], category: { id: 'demo-food', name: 'Food & Drinks' } },
+  { keywords: ['electricity'], category: { id: 'demo-bills', name: 'Bills & Utilities' }, labels: [{ id: 'demo-home', name: 'Home' }] },
   { keywords: ['salary'], category: { id: 'demo-income', name: 'Income' } },
 ];
 
 // Past categorised Wallet records, shaped like categoryHistory(), so the demo can show a guessed category.
 export const DEMO_HISTORY = [
-  { texts: ['NETFLIX.COM'], keys: ['netflix com'], category: { id: 'demo-ent', name: 'Entertainment' }, type: 'expense' },
+  { texts: ['STREAMFLIX SUBSCRIPTION'], keys: ['streamflix subscription'], category: { id: 'demo-ent', name: 'Entertainment' }, type: 'expense' },
 ];
 
 // Mirrors what existingRecords() returns from the real API.

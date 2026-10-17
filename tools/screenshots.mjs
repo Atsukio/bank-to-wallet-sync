@@ -14,7 +14,7 @@ const DPR = 2;
 
 // ---- the real pages, rendered at 2x
 async function shoot(file, setup, { width, height = 900, dark = false } = {}) {
-  const env = { ...baseEnv(), tabUrl: 'https://example.com/', settings: { token: 'demo', accountId: 'demo-savings', accountName: 'Maybank Savings' } };
+  const env = { ...baseEnv(), tabUrl: 'https://example.com/', settings: { token: 'demo', accountId: 'demo-savings', accountName: 'Everyday Savings' } };
   const page = await newPanel(browser, server, env, file, { dark });
   await page.setViewport({ width, height, deviceScaleFactor: DPR });
   await setup(page);
@@ -26,7 +26,11 @@ async function shoot(file, setup, { width, height = 900, dark = false } = {}) {
   return { shot, rects, headings };
 }
 
-const panel = await shoot('popup.html', async (page) => { await page.click('#demo'); await wait(700); }, { width: 420 });
+// The panel is captured whole and cut into bands, so its pinned bars (select-all, Add to Wallet) go back in the flow.
+const panel = await shoot('popup.html', async (page) => {
+  await page.click('#demo'); await wait(700);
+  await page.addStyleTag({ content: '#results > .bar, #results > .actions { position: static !important; }' });
+}, { width: 420 });
 const settings = await shoot('options.html', async (page) => {
   await page.evaluate(() => { document.querySelector('.switch-row details').open = true; });
 }, { width: 560, height: 700 });
@@ -70,7 +74,7 @@ const settingsBand = await (async () => {
 
 const shots = {
   'screenshot-1-review.png': slide('Review before you sync', 'Read the transactions on your bank page, then tick exactly what you want in Wallet.', b64(topOfPanel), { cardWidth: 400 }),
-  'screenshot-2-duplicates.png': slide('No more double entries', 'Compares date, amount and description with your Wallet records. Likely matches stay unticked, and a record saved with the wrong type is flagged, with a one-click fix.', b64(await band('MCDONALDS', 'XCORE')), { cardWidth: 380 }),
+  'screenshot-2-duplicates.png': slide('No more double entries', 'Compares date, amount and description with your Wallet records. Likely matches stay unticked, and a record saved with the wrong type is flagged, with a one-click fix.', b64(await band('BURGER CORNER', 'GYM MEMBERSHIP')), { cardWidth: 380 }),
   'screenshot-3-settings.png': slide('Make it yours', 'Pick the Wallet account per bank account, set transfer rules, and choose how the panel behaves. Everything stays in your browser.', b64(settingsBand), { cardWidth: 500 }),
 };
 for (const [file, html] of Object.entries(shots)) {
