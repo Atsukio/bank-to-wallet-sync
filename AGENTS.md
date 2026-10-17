@@ -2,6 +2,8 @@
 
 Chrome/Edge (Manifest V3) extension: reads the transaction table on a supported bank page (Maybank2u and CIMB Clicks) and adds new rows to BudgetBakers Wallet through its REST API. Built for the owner's own use and friends; others are welcome to use it. Repo: https://github.com/Atsukio/bank-to-wallet-sync (branch `main`).
 
+**Shared rules first:** this file covers only what is specific to this extension. The rules common to all of the owner's extensions (design, permissions, privacy, releases, commit messages, Windows gotchas, working with the owner) are in `../extension-kit/CONVENTIONS.md` (imported by `CLAUDE.md`). Where the two differ, this file wins.
+
 ## Layout
 Plain ES modules, no bundler, **no runtime dependencies**, no build step: load the folder unpacked at `chrome://extensions`. `package.json` exists only for tests and release tooling (`"type": "module"`).
 
@@ -27,6 +29,7 @@ Plain ES modules, no bundler, **no runtime dependencies**, no build step: load t
 | `.github/workflows/ci.yml` | Runs `npm test` and `npm run build` on every push and PR. |
 | `PRIVACY.md` | Privacy policy (its URL goes in the Web Store dashboard). Keep it true to what the code does. |
 | `dist/` | Built upload zip (the one place `.zip` is not gitignored). |
+| `CLAUDE.md` | Imports `../extension-kit/CONVENTIONS.md` and this file. Not shipped. |
 
 ## Commands
 ```
@@ -39,9 +42,9 @@ npm run palette -- "#1a73e8" --write
 Browser for tests: Edge/Chrome are found automatically on Windows, macOS and Linux; set `CHROME_PATH` otherwise. Chrome 137+ ignores `--load-extension`, so tests run the real pages over HTTP against a stubbed `chrome` (see Testing).
 
 ## Design system (Material Design 3)
-- Colours are M3 roles in the generated block of `style.css`, from `tools/palette.cjs` (Google's official algorithm; `npm i` installs `@material/material-color-utilities@0.3.0`, newer versions break under Node ESM). Current scheme: **Vibrant, seed `#1a73e8`**. The owner found the earlier muted teal dull. Never hand-edit the block; pages use `--md-*` tokens, never hex values. `--credit` (income green) and `--warn` (amber) are generated too. The extension icon is still the original teal pixel art.
+- Colours are M3 roles in the generated block of `style.css`, from `tools/palette.cjs`. Current scheme: **Vibrant, seed `#1a73e8`**. The owner found the earlier muted teal dull. Pages use `--md-*` tokens. `--credit` (income green) and `--warn` (amber) are generated too. The extension icon is still the original teal pixel art.
 - Where colour is used: primary for the title, links and filled buttons; secondary for dates and the balance; tertiary for categories and transfers (a transfer row's amount uses `.amt.xfer`, tertiary, since it is neither spending nor income); error for debits and sign/type warnings; chips: `.chip.in` (secondary container) "In Wallet", `.chip.likely` (tertiary container) "Likely in Wallet" and "Transfer", `.chip.check` (error container) "Type differs".
-- Typography: M3 type scale in Roboto (bundled; a remote font would leak IPs and contradict `PRIVACY.md`). Base body-large 16/24 +0.5; body-medium 14/20 for secondary lines; label-large 14/20 500 for buttons; label-medium 12/20 500 for chips; title-large 22/28 for headings; headline-medium 28/36 for the Settings title. The owner found a 14px base too small: do not shrink it again.
+- Typography: M3 type scale in bundled Roboto (variable weight). Base body-large 16/24 +0.5; body-medium 14/20 for secondary lines; label-large 14/20 500 for buttons; label-medium 12/20 500 for chips; title-large 22/28 for headings; headline-medium 28/36 for the Settings title. The owner found a 14px base too small: do not shrink it again.
 - Components: pill buttons (outlined; `.primary` filled; `button.text` borderless; `button.icon-btn` round), 4px outlined text fields, compact M3 switches (40x24; the owner found 52x32 too big), collapsible `<details>` descriptions beside each switch, M3 two-line list items in the review list, an M3 divider in the unsupported popup.
 - Check every UI change in light and dark. `npm run screenshots` renders the real pages.
 
@@ -107,10 +110,10 @@ Browser for tests: Edge/Chrome are found automatically on Windows, macOS and Lin
 - Amount sign decides income vs expense (a transfer is a separate `transfer` field, not a third type). List responses use keys like `records`, `accounts`, `recordRules`; pagination via `nextOffset`. Account has `archived`. `POST /records` max 50 (we send 20), `PATCH` max 10, `DELETE` max 10 ids. Record `recordState` includes `void`.
 
 ## Conventions
-- Match the existing style: small functions, short comments that explain why, no frameworks, no runtime dependencies.
-- Bank and Wallet data in repo files, screenshots, tests or examples must be **synthetic** (`demo.js`, test fixtures). Never commit, paste or read real transactions, API tokens or `.env` files. The owner's token only ever lives in extension storage.
-- Files use CRLF on disk. Patching with scripts: normalise `\r\n` first and write back the original style, or use the Edit tool. For regex-heavy edits write a script file (heredoc escaping mangles backslashes). The Write/Edit tools need the file read in the session first.
-- Keep `PRIVACY.md` and `store/LISTING.md` in step with behaviour changes (what is read, stored, sent, and permissions).
+- Small functions, short comments that explain why.
+- Synthetic data (see `CONVENTIONS.md`) means `demo.js` and test fixtures here: no real transactions. The owner's Wallet token only ever lives in extension storage.
+- Files use CRLF on disk. Patching with scripts: normalise `\r\n` first and write back the original style, or use the Edit tool. The Write/Edit tools need the file read in the session first.
+- `PRIVACY.md` and `store/LISTING.md` must stay in step with behaviour (see `CONVENTIONS.md`).
 - New runtime file? Add it to `FILES` in `tools/build.cjs` (the build fails if a shipped file refers to one that isn't listed, and a test checks the zip).
 
 ## Testing
@@ -126,27 +129,13 @@ Not coverable headless, so verify in a real browser when touching them: the serv
 5. Upload `dist/bank-to-wallet-sync-<version>.zip`.
 
 ## Commit messages
-All commits follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/):
+Conventional Commits as in `CONVENTIONS.md`, plus:
 
-```text
-<type>(<optional scope>)<optional !>: <imperative summary, lower case, no full stop>
-
-<optional body: what changed and why, wrapped at 72 columns>
-
-<optional footers: BREAKING CHANGE: ..., Co-Authored-By: ...>
-```
-
-- **Types:** `feat` (user-visible feature), `fix` (bug fix), `docs`, `refactor`, `test`, `ci`, `build`, `chore`, `perf`, `style`, `revert`.
 - **Scope** is optional: `panel`, `scanner`, `matching`, `wallet`, `settings`, `background`, `sites`, `store`, `theme`. For example, `fix(scanner): read the sign from the debit column`.
-- **Breaking changes:** put `!` after the type/scope and add a `BREAKING CHANGE:` footer that explains how to migrate (for example, stored settings that are reset).
-- **Versioning:** the commits since the last release decide the next `manifest.json` version. Any breaking change means a major bump, otherwise any `feat` means minor, otherwise any `fix` means patch. `docs`, `ci`, `chore` and similar commits on their own don't need a release. A release commit is `chore(release): vX.Y.Z`.
-- Commits made by an AI agent end with its `Co-Authored-By` trailer as the last footer.
-- Commits before 2026-10-14 predate this rule. Don't rewrite history to fix them.
+- The version lives only in `manifest.json` (`package.json` stays `0.0.0`). A release commit is `chore(release): vX.Y.Z` (with `v`).
 
 ## Working with the owner
-- They test on the real Maybank2u page and report back with screenshots; expect real values in them. Do not repeat or store those values.
-- They ask for commits and pushes explicitly. Don't push unprompted; offer when a coherent set of changes is ready. Commit messages follow [Commit messages](#commit-messages) and end with the `Co-Authored-By` line from the session's attribution instructions. Git identity is configured globally.
-- They iterate on look and feel (colour, size, density) from screenshots: show a render before and after.
+The shared rules are in `CONVENTIONS.md`. Here: they test on the real Maybank2u page and report back with screenshots; expect real values in them. Do not repeat or store those values. Git identity is configured globally.
 
 ## Status as of 2026-10-17 (v0.4.0)
 - Released in git: v0.1.1, v0.1.2, v0.2.0, v0.3.0 (adds CIMB Clicks, so the store update asks users to accept the new host permission) and v0.4.0 (`chore(release): v0.4.0`; the What's new card and NEW badge; no changelog entry of its own, so it updates quietly from 0.3.0). The 0.1.0/0.1.1 zips committed earlier were tar archives (see Releasing); 0.1.2 onwards are real zips from `tools/build.cjs`.
