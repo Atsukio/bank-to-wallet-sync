@@ -1,6 +1,6 @@
 node_modules/
 *.zip
-!dist/*.zip
+dist/
 *.crx
 *.pem
 .env
