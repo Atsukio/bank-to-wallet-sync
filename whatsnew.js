@@ -16,20 +16,22 @@ export async function setNewBadge() {
 }
 
 // Called from onInstalled. A reload of an unpacked copy reports 'update' with the same version: not an update.
-// If the user updates twice before looking, keep the older version so they see both releases' changes.
-export async function noteUpdate(previousVersion) {
+// If the user updates twice before looking, keep the older version so they see both releases' changes. A release
+// with nothing new to tell (no changelog entry since `from`) stays quiet: no badge, so nothing that clears itself.
+export async function noteUpdate(previousVersion, log = CHANGELOG) {
   const version = chrome.runtime.getManifest().version;
   if (!previousVersion || previousVersion === version) return;
   const { whatsNewFrom } = await chrome.storage.local.get('whatsNewFrom');
   const from = whatsNewFrom && compareVersions(whatsNewFrom, previousVersion) < 0 ? whatsNewFrom : previousVersion;
+  if (!changesSince(from, version, log).length) return;
   await chrome.storage.local.set({ whatsNewFrom: from });
   await setNewBadge();
 }
 
 // Badge text doesn't survive a browser restart.
-export async function restoreBadge() {
+export async function restoreBadge(log = CHANGELOG) {
   const { whatsNewFrom } = await chrome.storage.local.get('whatsNewFrom');
-  if (whatsNewFrom) await setNewBadge();
+  if (whatsNewFrom && changesSince(whatsNewFrom, chrome.runtime.getManifest().version, log).length) await setNewBadge();
 }
 
 async function dismiss() {

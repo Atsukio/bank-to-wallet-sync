@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { check, finish, ROOT, wait } from './helpers.mjs';
 
-let prefs = {}, calls = [], opened = 0, badge = [];
+let prefs = {}, calls = [], opened = 0, badge = [], running = '0.3.0';
 const L = {};
 const listener = (name) => ({ addListener: (f) => { L[name] = f; } });
 globalThis.chrome = {
@@ -27,7 +27,7 @@ globalThis.chrome = {
     get: async (id) => ({ id, url: id === 1 ? 'https://www.maybank2u.com.my/x' : 'https://example.com/' }),
     onUpdated: listener('updated'), onActivated: listener('activated'),
   },
-  runtime: { onInstalled: listener('installed'), onStartup: listener('startup'), openOptionsPage: () => { opened++; }, getManifest: () => ({ version: '9.9.0' }) },
+  runtime: { onInstalled: listener('installed'), onStartup: listener('startup'), openOptionsPage: () => { opened++; }, getManifest: () => ({ version: running }) },
   permissions: { contains: async ({ origins }) => origins.every((o) => granted.includes(o)), onAdded: listener('permAdded'), onRemoved: listener('permRemoved') },
 };
 let granted = [];
@@ -72,21 +72,26 @@ L.clicked({ id: 1 });
 check('icon click (and the shortcut) opens the panel for that tab', calls.some((c) => c[0] === 'open' && c[1] === 1));
 
 opened = 0;
-// ---- what's new (the running version is 9.9.0 here)
-await L.installed({ reason: 'update', previousVersion: '9.8.0' });
+// ---- what's new, against the real changelog (it has an entry for 0.3.0)
+running = '0.3.0';
+await L.installed({ reason: 'update', previousVersion: '0.2.0' });
 check('updating does not open Settings', opened === 0);
-check("what's new: an update stores the version the user came from and puts NEW on the icon", prefs.whatsNewFrom === '9.8.0' && badge.at(-1) === 'NEW', JSON.stringify([prefs.whatsNewFrom, badge]));
-await L.installed({ reason: 'update', previousVersion: '9.8.5' });
-check("what's new: a second update before the card is seen keeps the older version", prefs.whatsNewFrom === '9.8.0', prefs.whatsNewFrom);
+check("what's new: an update stores the version the user came from and puts NEW on the icon", prefs.whatsNewFrom === '0.2.0' && badge.at(-1) === 'NEW', JSON.stringify([prefs.whatsNewFrom, badge]));
+await L.installed({ reason: 'update', previousVersion: '0.2.5' });
+check("what's new: a second update before the card is seen keeps the older version", prefs.whatsNewFrom === '0.2.0', prefs.whatsNewFrom);
 delete prefs.whatsNewFrom; badge = [];
-await L.installed({ reason: 'update', previousVersion: '9.9.0' });
+await L.installed({ reason: 'update', previousVersion: '0.3.0' });
 check("what's new: reloading the same version (an unpacked copy) does nothing", !('whatsNewFrom' in prefs) && !badge.length);
+running = '0.3.1';
+await L.installed({ reason: 'update', previousVersion: '0.3.0' });
+check("what's new: an update with no changelog entry since then stays quiet: no badge to clear later", !('whatsNewFrom' in prefs) && !badge.length, JSON.stringify([prefs.whatsNewFrom, badge]));
+running = '0.3.0';
 await L.installed({ reason: 'install' });
 check('a fresh install opens Settings (the getting-started guide)', opened === 1);
 check("what's new: a fresh install shows nothing", !('whatsNewFrom' in prefs) && !badge.length);
 await L.startup();
 check("what's new: a browser restart with nothing pending sets no badge", !badge.length);
-prefs.whatsNewFrom = '9.8.0';
+prefs.whatsNewFrom = '0.2.0';
 await L.startup();
 check('what\'s new: a browser restart before "Got it" puts NEW back', badge.at(-1) === 'NEW');
 
