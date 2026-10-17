@@ -28,7 +28,9 @@ globalThis.chrome = {
     onUpdated: listener('updated'), onActivated: listener('activated'),
   },
   runtime: { onInstalled: listener('installed'), onStartup: listener('startup'), openOptionsPage: () => { opened++; }, getManifest: () => ({ version: '9.9.0' }) },
+  permissions: { contains: async ({ origins }) => origins.every((o) => granted.includes(o)), onAdded: listener('permAdded'), onRemoved: listener('permRemoved') },
 };
+let granted = [];
 await import(pathToFileURL(path.join(ROOT, 'background.js')).href);
 
 const cases = [
@@ -52,6 +54,19 @@ L.storage({ token: { newValue: 'x' } }); await wait(50);
 const unrelated = calls.length;
 L.storage({ hideWhenAway: { newValue: false } }); await wait(50);
 check('only the two panel switches re-sync tabs', unrelated === 0 && calls.length > 0, `unrelated=${unrelated} switch=${calls.length}`);
+
+// ---- optional bank access (CIMB Clicks): without it the tab is treated as unsupported, so its popup can ask
+prefs = { onlySupported: true, hideWhenAway: true }; calls = [];
+const cimb = { id: 3, url: 'https://www.cimbclicks.com.my/clicks/#/' };
+await L.updated(3, { url: cimb.url }, cimb); await wait(20);
+const popupFor3 = () => calls.filter((c) => c[0] === 'popup' && c[1] === 3).at(-1)?.[2];
+check('a bank whose optional access is not granted gets the popup (which offers to allow it), not the panel', popupFor3() === 'unsupported.html' && calls.some((c) => c[0] === 'panel' && c[1] === 3 && c[2] === false));
+granted = ['https://*.cimbclicks.com.my/*'];
+await L.updated(3, { url: cimb.url }, cimb); await wait(20);
+check('once access is granted the panel opens there', popupFor3() === '' && calls.filter((c) => c[0] === 'panel' && c[1] === 3).at(-1)?.[2] === true);
+calls = [];
+await L.permAdded({ origins: granted }); await wait(20);
+check('granting or removing access re-syncs the open tabs', calls.some((c) => c[0] === 'panel' && c[1] === 'global') && typeof L.permRemoved === 'function');
 
 L.clicked({ id: 1 });
 check('icon click (and the shortcut) opens the panel for that tab', calls.some((c) => c[0] === 'open' && c[1] === 1));

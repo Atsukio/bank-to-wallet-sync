@@ -55,7 +55,7 @@ Copy transactions from the supported bank page the user is viewing (currently Ma
 - **scripting**: Injects the reader that extracts the transaction table (and the account heading) from the bank page the user is viewing.
 - **sidePanel**: Shows the review/sync interface in Chrome's side panel.
 - **Host permission `https://*.maybank2u.com.my/*`**: Needed to read the transaction table on Maybank2u pages, and to enable the side panel only on those tabs.
-- **Host permission `https://*.cimbclicks.com.my/*`**: The same, for CIMB Clicks pages.
+- **Optional host permission `https://*.cimbclicks.com.my/*`**: Requested only when the user chooses to use CIMB Clicks (from the extension's popup on a CIMB Clicks page, or in Settings), to read the transaction table on those pages and enable the side panel there. Users can remove it in Settings.
 - **Host permission `https://rest.budgetbakers.com/*`**: Needed to call the official Wallet REST API to look up existing records, accounts, categories and rules, create new records, update an existing record's note, date or amount sign only when the user presses the matching button, and delete the records the extension itself just created when the user presses Undo.
 - **Keyboard shortcut (commands)**: Optional Alt+Shift+W to open the panel; it needs no extra permission.
 

@@ -181,6 +181,16 @@ const settle = (ms = 700) => wait(ms);
   await page.close();
 }
 
+// ---------------------------------------------------------------- optional bank access (panel allowed on any site)
+{
+  const { page } = await open({ tabUrl: 'https://www.cimbclicks.com.my/clicks/#/history', noAccess: ['https://*.cimbclicks.com.my/*'], rows: [{ date: '2026-10-07', desc: 'ROW ONE', amount: -10 }] });
+  await settle();
+  check('panel on CIMB without access: asks to allow it and reads nothing', (await visible(page, '#access')) && (await text(page, '#allowBank')) === 'Allow CIMB Clicks' && (await log(page, 'scans')) === 0);
+  await page.click('#allowBank'); await settle();
+  check('...Allow grants it and reads the page', !(await visible(page, '#access')) && (await rows(page)).length === 1);
+  await page.close();
+}
+
 // ---------------------------------------------------------------- infinite scroll (CIMB loads more rows into the same table)
 {
   const { page } = await open({ tabUrl: 'https://www.cimbclicks.com.my/clicks/#/history', rows: [{ date: '2026-10-07', desc: 'ROW ONE', amount: -10 }, { date: '2026-10-05', desc: 'ROW TWO', amount: -20 }] });

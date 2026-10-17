@@ -56,7 +56,7 @@ const settle = (ms = 500) => wait(ms);
   const page = await newPanel(browser, server, baseEnv(), 'unsupported.html');
   await settle(200);
   check('popup lists every supported bank', (await text(page, '#banks')).includes('Maybank2u') && (await text(page, '#banks')).includes('CIMB Clicks') && (await text(page, '#banks')).includes('cimbclicks.com.my'));
-  check('popup explains the site is not supported and where the setting is', (await text(page, 'h1')).includes("isn't supported") && (await text(page, '.hint')).includes('Only open on supported sites'));
+  check('popup explains the site is not supported and where the setting is', (await text(page, 'h1')).includes("isn't supported") && (await text(page, '#notSupported .hint')).includes('Only open on supported sites'));
   await page.evaluate(() => { window.close = () => { window.__closed = true; }; });
   await page.click('#openSettings');
   check('the cog opens Settings and closes the popup', (await log(page, 'opened')) === 1 && await page.evaluate(() => window.__closed === true));
@@ -69,6 +69,38 @@ const settle = (ms = 500) => wait(ms);
   check("the popup shows the what's-new card too (the NEW badge shows on every site)", (await visible(page, '#whatsNew')) && (await text(page, '#whatsNew h2')) === "What's new in 0.3.0");
   await page.click('#whatsNew button'); await settle(200);
   check('...and "Got it" there clears it as well', !(await visible(page, '#whatsNew')) && !('whatsNewFrom' in (await store(page))));
+  await page.close();
+}
+
+// ---------------------------------------------------------------- optional bank access (CIMB Clicks)
+const CIMB = 'https://*.cimbclicks.com.my/*';
+{
+  const page = await newPanel(browser, server, { ...baseEnv(), tabUrl: 'https://www.cimbclicks.com.my/clicks/#/', noAccess: [CIMB] }, 'unsupported.html');
+  await settle(200);
+  check('popup on CIMB without access: asks to allow it instead of saying "not supported"',
+    (await text(page, 'h1')) === 'Allow CIMB Clicks?' && (await visible(page, '#needsAccess')) && !(await visible(page, '#notSupported')) && (await text(page, '#allow')) === 'Allow CIMB Clicks');
+  await page.click('#allow'); await settle(200);
+  check('...Allow asks Chrome for that bank only, then says to click the icon again',
+    JSON.stringify(await log(page, 'requested')) === JSON.stringify([CIMB]) && (await text(page, '#allowText')).includes('Click the extension icon again') && !(await visible(page, '#allow')));
+  await page.close();
+}
+{
+  const page = await newPanel(browser, server, { ...baseEnv(), tabUrl: 'https://www.cimbclicks.com.my/clicks/#/', noAccess: [CIMB], denyAccess: true }, 'unsupported.html');
+  await settle(200);
+  await page.click('#allow'); await settle(200);
+  check('...declining leaves the Allow button there to try again', await visible(page, '#allow'));
+  await page.close();
+}
+{
+  const page = await newPanel(browser, server, { ...baseEnv(), noAccess: [CIMB] }, 'options.html');
+  await settle(300);
+  const cimbItem = () => page.evaluate(() => [...document.querySelectorAll('#banks li')].find((li) => li.textContent.includes('CIMB'))?.textContent);
+  check('Settings: Maybank2u needs nothing, CIMB Clicks shows it needs permission',
+    !(await page.evaluate(() => document.querySelector('#banks li').querySelector('button'))) && (await cimbItem()).includes('needs your permission'), await cimbItem());
+  await page.evaluate(() => [...document.querySelectorAll('#banks button')].find((b) => b.textContent === 'Allow').click()); await settle(200);
+  check('Settings: Allow grants it', (await log(page, 'requested')).includes(CIMB) && (await cimbItem()).includes('(allowed)'), await cimbItem());
+  await page.evaluate(() => [...document.querySelectorAll('#banks button')].find((b) => b.textContent === 'Remove access').click()); await settle(200);
+  check('Settings: Remove access gives it back', (await log(page, 'removed')).includes(CIMB) && (await cimbItem()).includes('needs your permission'), await cimbItem());
   await page.close();
 }
 

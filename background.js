@@ -1,4 +1,4 @@
-import { isSupportedUrl } from './sites.js';
+import { bankFor, hasAccess } from './sites.js';
 import { BEHAVIOUR_DEFAULTS } from './wallet.js';
 import { noteUpdate, restoreBadge } from './whatsnew.js';
 
@@ -12,7 +12,8 @@ const prefsOf = () => chrome.storage.local.get({ onlySupported: BEHAVIOUR_DEFAUL
 
 async function syncTab(tabId, url, prefs) {
   const { onlySupported, hideWhenAway } = prefs || (await prefsOf());
-  const supported = isSupportedUrl(url);
+  // A bank whose optional permission isn't granted counts as unsupported: its popup offers to allow it.
+  const supported = await hasAccess(bankFor(url));
   try {
     await chrome.sidePanel.setOptions({ tabId, path: 'popup.html', enabled: !hideWhenAway || supported || !onlySupported });
     await chrome.action.setPopup({ tabId, popup: onlySupported && !supported ? 'unsupported.html' : '' });
@@ -41,6 +42,10 @@ chrome.runtime.onStartup.addListener(async () => {
   await syncAllTabs();
   await restoreBadge();
 });
+
+// Allowing (or removing) a bank's optional access changes where the panel may open.
+chrome.permissions.onAdded.addListener(syncAllTabs);
+chrome.permissions.onRemoved.addListener(syncAllTabs);
 
 // Changing either switch applies to every open tab straight away.
 chrome.storage.onChanged.addListener((changes) => {

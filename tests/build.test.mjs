@@ -39,8 +39,12 @@ check('development files stay out (tests, tools, node_modules, store assets, doc
 check('the manifest only asks for the permissions it needs', JSON.stringify(manifest.permissions.slice().sort()) === JSON.stringify(['activeTab', 'scripting', 'sidePanel', 'storage']), JSON.stringify(manifest.permissions));
 const { SUPPORTED_BANKS } = await import(new URL('../sites.js', import.meta.url).href);
 const allowedHosts = [...SUPPORTED_BANKS.map((b) => b.host), 'rest.budgetbakers.com'];
-check('host access is limited to the supported banks and the Wallet API', manifest.host_permissions.every((h) => allowedHosts.some((host) => h.includes(host))), JSON.stringify(manifest.host_permissions));
-check('every supported bank has host access in the manifest', SUPPORTED_BANKS.every((b) => manifest.host_permissions.some((h) => h.includes(b.host))));
-check('no remote code or analytics hosts anywhere in the shipped scripts', ![...contents].filter(([n]) => n.endsWith('.js') || n.endsWith('.html')).some(([, c]) => /https?:\/\/(?!rest\.budgetbakers\.com|www\.maybank|[^'"\s]*maybank2u|localhost|schema)/.test(c.toString().replace(/https:\/\/github\.com\/[^\s'")]+|https:\/\/rest\.budgetbakers\.com[^\s'")]*|\/\^https[^\n]*/g, ''))));
+const required = manifest.host_permissions, optional = manifest.optional_host_permissions || [];
+check('host access is limited to the supported banks and the Wallet API', [...required, ...optional].every((h) => allowedHosts.some((host) => h.includes(host))), JSON.stringify([required, optional]));
+check('every supported bank\'s origin is in the manifest: required banks in host_permissions, optional ones in optional_host_permissions',
+  SUPPORTED_BANKS.every((b) => (b.optional ? optional : required).includes(b.origin) && !(b.optional ? required : optional).includes(b.origin)));
+// A new required host would disable the extension for existing users until they accept it (see sites.js).
+check('required hosts are only the ones existing users already granted (Maybank2u and the Wallet API)', JSON.stringify(required.slice().sort()) === JSON.stringify(['https://*.maybank2u.com.my/*', 'https://rest.budgetbakers.com/*']), JSON.stringify(required));
+check('no remote code or analytics hosts anywhere in the shipped scripts', ![...contents].filter(([n]) => n.endsWith('.js') || n.endsWith('.html')).some(([, c]) => /https?:\/\/(?!rest\.budgetbakers\.com|www\.maybank|[^'"\s]*maybank2u|localhost|schema|\*\.)/.test(c.toString().replace(/https:\/\/github\.com\/[^\s'")]+|https:\/\/rest\.budgetbakers\.com[^\s'")]*|\/\^https[^\n]*/g, ''))));
 
 finish();

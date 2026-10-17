@@ -1,5 +1,5 @@
 import { getSettings, listAccounts } from './wallet.js';
-import { SUPPORTED_BANKS } from './sites.js';
+import { SUPPORTED_BANKS, hasAccess, requestAccess } from './sites.js';
 
 const $ = (id) => document.getElementById(id);
 const SWITCHES = ['onlySupported', 'autoRead', 'hideWhenAway', 'collectPages'];
@@ -59,12 +59,35 @@ $('clearIgnored').onclick = async () => { await chrome.storage.local.set({ ignor
   fillAccounts(accountList.length ? accountList : s.accountId ? [{ id: s.accountId, name: s.accountName }] : [], s.accountId);
   renderRules(s.transferRules);
   showCounts(s);
-  $('banks').replaceChildren(...SUPPORTED_BANKS.map((b) => Object.assign(document.createElement('li'), { textContent: `${b.name}, ${b.country}` })));
+  renderBanks();
   // Refresh the account list quietly so the pickers show everything Wallet has.
   if (s.token) {
     try { await refreshAccounts(s.token, s.accountId); } catch { /* the stored list is still usable */ }
   }
 })();
+
+// Banks with optional access show whether it is granted, with a button to allow or remove it.
+async function renderBanks() {
+  const items = await Promise.all(SUPPORTED_BANKS.map(async (bank) => {
+    const li = document.createElement('li');
+    li.append(`${bank.name}, ${bank.country}`);
+    if (!bank.optional) return li;
+    const allowed = await hasAccess(bank);
+    const state = Object.assign(document.createElement('span'), { className: 'muted', textContent: allowed ? ' (allowed)' : ' (needs your permission)' });
+    const button = Object.assign(document.createElement('button'), { className: 'text', textContent: allowed ? 'Remove access' : 'Allow' });
+    button.onclick = async () => {
+      if (allowed) await chrome.permissions.remove({ origins: [bank.origin] }).catch(() => {});
+      else await requestAccess(bank);
+      renderBanks();
+    };
+    li.append(state, ' ', button);
+    return li;
+  }));
+  $('banks').replaceChildren(...items);
+}
+// access granted from the popup or the panel while Settings is open
+chrome.permissions.onAdded.addListener(renderBanks);
+chrome.permissions.onRemoved.addListener(renderBanks);
 
 async function refreshAccounts(token, selectedId) {
   const accounts = await listAccounts(token);

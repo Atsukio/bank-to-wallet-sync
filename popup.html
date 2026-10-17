@@ -16,6 +16,8 @@
   select.acct { width: 100%; padding: 6px 10px; font-weight: 500; letter-spacing: .1px; border: 1px solid var(--md-outline); border-radius: 8px; background-color: var(--md-surface); color: var(--md-on-surface); }
   #bank { font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #balance { font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-secondary); font-weight: 500; }
+  .access { margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: var(--md-surface-container-high); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
+  .access p { margin: 0 0 8px; }
   .reconcile { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); }
   .reconcile.off span { color: var(--warn); }
   .reconcile button { flex: none; }
@@ -89,6 +91,7 @@
   </div>
 
   <div class="actions"><button class="primary grow" id="read">Read transactions on this page</button><button id="demo" title="Dummy transactions, no login or Wallet token needed">Demo data</button></div>
+  <div class="access" id="access" hidden><p id="accessText"></p><button class="primary" id="allowBank"></button></div>
   <div class="status-row"><p class="status" id="status"></p><button id="undo" hidden title="Delete the records the last Add created">Undo last add</button></div>
 
   <section id="results" hidden>

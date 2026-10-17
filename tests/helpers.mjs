@@ -71,7 +71,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
   await page.setViewport({ width: 420, height: 900 });
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }]);
   await page.evaluateOnNewDocument((e) => {
-    const t = (window.__t = { env: e, scans: 0, watchers: 0, fetches: [], created: [], deleted: [], patched: [], badge: [], globalBadge: [], opened: 0, mirror: 0, listeners: { message: [], updated: [], activated: [], storage: [] } });
+    const t = (window.__t = { env: e, scans: 0, watchers: 0, fetches: [], created: [], deleted: [], patched: [], badge: [], globalBadge: [], opened: 0, mirror: 0, requested: [], removed: [], listeners: { message: [], updated: [], activated: [], storage: [], permAdded: [], permRemoved: [] } });
     const store = { ...e.settings };
     t.store = store;
     const json = (body) => ({ ok: true, status: 200, headers: new Headers(e.headers), json: async () => body });
@@ -121,6 +121,19 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
       },
       runtime: { openOptionsPage() { t.opened++; }, onMessage: ev('message'), getManifest: () => ({ version: e.version || '0.3.0' }) },
       tabs: { query: async () => [tab()], onUpdated: ev('updated'), onActivated: ev('activated') },
+      // Optional host access: everything is granted unless listed in env.noAccess; request() grants it unless
+      // env.denyAccess. Requests and removals are logged.
+      permissions: {
+        contains: async ({ origins }) => origins.every((o) => !(t.env.noAccess || []).includes(o)),
+        request: async ({ origins }) => {
+          t.requested.push(...origins);
+          if (t.env.denyAccess) return false;
+          t.env.noAccess = (t.env.noAccess || []).filter((o) => !origins.includes(o));
+          return true;
+        },
+        remove: async ({ origins }) => { t.removed.push(...origins); t.env.noAccess = [...(t.env.noAccess || []), ...origins]; return true; },
+        onAdded: ev('permAdded'), onRemoved: ev('permRemoved'),
+      },
       action: {
         setBadgeText: async (o) => { t.badge.push(o.text); if (o.tabId == null) t.globalBadge.push(o.text); },
         setBadgeBackgroundColor: async () => {},

@@ -4,7 +4,7 @@ import {
   memoryKey, sameDescription, mergedNote, toWalletRecord, recordText, createRecords, updateRecords, deleteRecords,
 } from './wallet.js';
 import { signature, matchRecords, carryOver, matchTransferRule, MAX_DATE_LAG, shiftDate } from './matching.js';
-import { isSupportedUrl } from './sites.js';
+import { bankFor, hasAccess, requestAccess } from './sites.js';
 import { showWhatsNew } from './whatsnew.js';
 import {
   DEMO_TXS, DEMO_RULES, DEMO_HISTORY, DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSFER_RULES, DEMO_BANK_BALANCE, demoRecords,
@@ -243,13 +243,25 @@ async function readPage(opts = {}) {
   try { await readPageNow(opts); } finally { setBusy(false); }
 }
 
+// A bank with optional access that hasn't been granted yet (see sites.js): ask, then read.
+function askAccess(site) {
+  $('accessText').textContent = `To read this page, Bank to Wallet Sync needs your permission to read ${site.host} pages. It only reads the transaction table, and only when you use it.`;
+  $('allowBank').textContent = `Allow ${site.name}`;
+  $('allowBank').onclick = async () => { if (await requestAccess(site)) readPage(); };
+  $('access').hidden = false;
+  setStatus('');
+}
+
 async function readPageNow({ auto = false, quiet = false, force = false } = {}) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   activeTabId = tab?.id ?? null;
-  if (!isSupportedUrl(tab?.url)) {
+  const site = bankFor(tab?.url);
+  $('access').hidden = true;
+  if (!site) {
     if (!auto && !quiet) setStatus('Open your bank\'s transaction history, then try again.', 'error');
     return;
   }
+  if (!(await hasAccess(site))) return askAccess(site);
   const soft = auto || quiet;
   if (!soft) { $('results').hidden = true; $('payload').hidden = true; setStatus('Reading page…'); }
   const target = { tabId: tab.id, allFrames: true };
