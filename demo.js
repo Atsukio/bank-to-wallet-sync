@@ -34,7 +34,9 @@ export const DEMO_ACCOUNTS = [
 ];
 
 // What the demo "bank page" shows as its balance (a little above the demo Wallet balance, so Adjust has something to do).
-export const DEMO_BANK_BALANCE = { label: 'Current Balance', amount: 3500 };
+// Wallet's 3482.10 + the new rows (-3033.97) - the "Not in Bank" records (-21.90), so the page explains the whole
+// difference (no "Other" line in the store screenshots).
+export const DEMO_BANK_BALANCE = { label: 'Current Balance', amount: 470.03 };
 
 // Fake category list for the per-row picker, shaped like listCategories().
 export const DEMO_CATEGORIES = [
