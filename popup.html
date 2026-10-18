@@ -2,8 +2,9 @@
 <html lang="en"><head><meta charset="utf-8"><title>Bank to Wallet Sync</title><link rel="stylesheet" href="style.css">
 <style>
   body { padding: 14px; min-width: 280px; }
-  header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: -4px -6px 0 0; }
-  h1 { font: 500 22px/28px Roboto, system-ui, sans-serif; letter-spacing: 0; margin: 0; color: var(--md-primary); }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: -4px -6px 12px 0; }
+  h1 { margin: 0; line-height: 0; }
+  h1 img { image-rendering: pixelated; } /* the icon is pixel art: keep it crisp when scaled down */
   /* compact buttons for the narrow panel (the shared style.css sizes suit the roomier Settings page) */
   button { padding: 4px 12px; font-size: 13px; line-height: 18px; border-radius: 16px; }
   button.icon-btn { width: 36px; height: 36px; padding: 0; }
@@ -13,24 +14,35 @@
   .account-info { margin: 0 0 4px; }
   .account-info p { margin: 0; }
   #account { font-weight: 500; letter-spacing: .1px; color: var(--md-on-surface); }
-  select.acct { width: 100%; padding: 6px 10px; font-weight: 500; letter-spacing: .1px; border: 1px solid var(--md-outline); border-radius: 8px; background-color: var(--md-surface); color: var(--md-on-surface); }
+  select.acct { width: 100%; margin: 0 0 8px; padding: 6px 10px; font-weight: 500; letter-spacing: .1px; border: 1px solid var(--md-outline); border-radius: 8px; background-color: var(--md-surface); color: var(--md-on-surface); }
   /* a long account name is shortened with "…" but the last digits always stay visible; the full text is the tooltip */
   #bank { display: flex; gap: 4px; font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); white-space: nowrap; }
   #bankLabel { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   #bankDigits { flex: none; }
-  #balance { font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-secondary); font-weight: 500; }
+  /* Wallet | Bank side by side; subgrid keeps label, amount and verdict/Adjust rows level across the divider */
+  .balances { display: grid; grid-template-columns: 1fr 1fr; column-gap: 12px; }
+  .balances[hidden], .side[hidden] { display: none; }
+  .side { display: grid; grid-row: span 3; grid-template-rows: subgrid; align-items: center; justify-items: start; min-width: 0; }
+  /* the divider runs beside the label and amount only, not the verdict/Adjust row */
+  .side.bank > .lbl, .side.bank > .amount { align-self: stretch; border-left: 1px solid var(--md-outline-variant); padding-left: 12px; }
+  .side .lbl { font-size: 12px; line-height: 16px; letter-spacing: .5px; font-weight: 500; color: var(--md-on-surface-variant); }
+  .side .amount { font-size: 16px; line-height: 24px; letter-spacing: .15px; font-weight: 500; }
+  #balance { color: var(--md-secondary); }
+  #bankLine { color: var(--md-tertiary); }
+  #reconcileText { font-size: 14px; line-height: 20px; letter-spacing: .25px; }
+  #adjust { margin-left: 4px; } /* its text lines up with the bank column's (12px in, less the button's 8px padding) */
   .access { margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: var(--md-surface-container-high); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
   .access p { margin: 0 0 8px; }
-  .reconcile { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; line-height: 20px; letter-spacing: .25px; color: var(--md-on-surface-variant); }
   .verdict { font-weight: 500; }
   .verdict.ok { color: var(--credit); }
-  .verdict.off { color: var(--warn); }
+  .verdict.up { color: var(--credit); }
+  .verdict.down { color: var(--md-error); }
   /* the summary above the list, coloured like the row chips it counts */
   .s-new { color: var(--md-primary); font-weight: 500; }
   .s-likely { color: var(--md-tertiary); }
   .s-check { color: var(--md-error); }
   .s-warn { color: var(--warn); }
-  .reconcile button { flex: none; }
+  .why { margin: 2px 0 0; font-size: 14px; line-height: 20px; letter-spacing: .25px; }
   .adjust-confirm { margin: 6px 0; padding: 10px 12px; border-radius: 12px; background: var(--md-surface-container-high); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
   .adjust-confirm p { margin: 0 0 8px; }
   .adjust-actions { display: flex; gap: 8px; }
@@ -55,6 +67,7 @@
   .match button { padding: 2px 12px; font-size: 13px; flex: none; }
   .acts { grid-column: 2 / -1; display: flex; gap: 4px; margin: -2px 0 0 -8px; }
   button.text { border: none; padding: 2px 8px; font-size: 13px; border-radius: 16px; }
+  button.text.confirm { color: var(--md-error); } /* the second click deletes */
   select.mini { max-width: 60%; padding: 2px 6px; font-size: 13px; border: 1px solid var(--md-outline); border-radius: 8px; background-color: var(--md-surface); color: var(--md-on-surface); }
   #coverage { margin: 0 0 8px; font-size: 14px; line-height: 20px; letter-spacing: .25px; }
   .desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -83,7 +96,7 @@
   <div class="progress" id="progress" role="progressbar" aria-label="Working" hidden></div>
   <div id="app">
   <header>
-    <h1>Bank to Wallet Sync</h1>
+    <h1><img src="icons/icon-128.png" width="32" height="32" alt="Bank to Wallet Sync" title="Bank to Wallet Sync"></h1>
     <button class="icon-btn" id="openSettings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg></button>
   </header>
   <section class="whats-new" id="whatsNew" aria-label="What's new" hidden></section>
@@ -95,11 +108,19 @@
     <select id="accountSelect" class="acct" aria-label="Wallet account to add to" hidden></select>
     <p id="account">No account set</p>
     <p id="bank" hidden><span id="bankLabel"></span><span id="bankDigits"></span></p>
-    <p id="balance" hidden></p>
-    <div class="reconcile" id="reconcile" hidden>
-      <span id="reconcileText"></span>
-      <button id="adjust" class="text" title="Add one record for the difference so Wallet's balance matches the bank's">Adjust</button>
+    <div class="balances" id="balances" hidden>
+      <div class="side">
+        <span class="lbl" id="walletLbl">Wallet</span>
+        <span class="amount" id="balance"></span>
+        <span id="reconcileText" hidden></span>
+      </div>
+      <div class="side bank" id="reconcile" hidden>
+        <span class="lbl">Bank</span>
+        <span class="amount" id="bankLine"></span>
+        <button id="adjust" class="text" title="Add one record for the difference so Wallet's balance matches the bank's">Adjust</button>
+      </div>
     </div>
+    <div class="muted why" id="reconcileWhy" hidden></div>
     <div class="adjust-confirm" id="adjustConfirm" hidden>
       <p id="adjustText"></p>
       <div class="adjust-actions"><button class="primary" id="adjustYes">Add adjustment</button><button id="adjustNo">Cancel</button></div>

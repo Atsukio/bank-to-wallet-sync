@@ -16,7 +16,8 @@ const typeOf = (t) => (t.amount < 0 ? 'expense' : 'income');
 //      (positive: Wallet earlier, e.g. a card purchase logged on the day the bank posts later; negative: Wallet later,
 //      e.g. a scheduled/automated Wallet record dated after the bank's debit). Closest day first (earlier wins a tie),
 //      same description preferred. It runs last, so a bank row that really is on that other day keeps its record.
-// Ignored rows take no part. Sets t.done / t.likely / t.typeMismatch / t.dateLag / t.match (the Wallet record).
+// Ignored rows take no part. Sets t.done / t.likely / t.typeMismatch / t.dateLag / t.match (the Wallet record), and
+// returns the records no transaction claimed.
 export const MAX_DATE_LAG = 3;
 export const shiftDate = (ymd, days) => new Date(Date.parse(`${ymd}T00:00:00Z`) + days * 864e5).toISOString().slice(0, 10);
 // Order to try: 1 day earlier, 1 day later, 2 earlier, 2 later, … (positive = Wallet earlier than the bank).
@@ -52,6 +53,7 @@ export function matchRecords(txs, records) {
       }
     }
   }
+  return pool;
 }
 
 // Remembers what the user chose by hand for a row, so a re-read (or the next page) doesn't undo it.

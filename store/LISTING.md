@@ -26,7 +26,8 @@ FEATURES
 • Fills in categories and labels from your own Wallet rules, the categories you've chosen before, and similar past records. Change any row's category before adding.
 • Turns card repayments and similar rows into proper Wallet transfers, using rules you set.
 • Review before anything is written: untick rows, ignore rows you never want, flip a sign, preview the payload, then Add to Wallet.
-• Undo the last add for 15 minutes.
+• Undo the last add while you're still on the page.
+• Shows Wallet records the bank page doesn't have ("Not in Bank"), and can delete one entered twice or on the wrong account.
 • Compares your Wallet balance with the bank's, and can add a one-click (confirmed, undoable) adjustment for any difference. The toolbar icon shows how many new transactions the page has.
 • Built-in demo data to try it with no bank login and no Wallet token.
 • Settings let you turn automatic reading off, allow the panel on any site, keep it open when you switch tabs, collect several pages into one add, and set a keyboard shortcut (default Alt+Shift+W).
@@ -56,12 +57,12 @@ Copy transactions from the supported bank page the user is viewing (currently Ma
 - **sidePanel**: Shows the review/sync interface in Chrome's side panel.
 - **Host permission `https://*.maybank2u.com.my/*`**: Needed to read the transaction table on Maybank2u pages, and to enable the side panel only on those tabs.
 - **Optional host permission `https://*.cimbclicks.com.my/*`**: Requested only when the user chooses to use CIMB Clicks (from the extension's popup on a CIMB Clicks page, or in Settings), to read the transaction table on those pages and enable the side panel there. Users can remove it in Settings.
-- **Host permission `https://rest.budgetbakers.com/*`**: Needed to call the official Wallet REST API to look up existing records, accounts, categories and rules, create new records, update an existing record's note, date or amount sign only when the user presses the matching button, and delete the records the extension itself just created when the user presses Undo.
+- **Host permission `https://rest.budgetbakers.com/*`**: Needed to call the official Wallet REST API to look up existing records, accounts, categories and rules, create new records, update an existing record's note, date or amount sign only when the user presses the matching button, and delete records only when the user asks: the ones the extension itself just created (Undo), or one Wallet record the bank page doesn't show, after the user confirms (Delete).
 - **Keyboard shortcut (commands)**: Optional Alt+Shift+W to open the panel; it needs no extra permission.
 
 ## Test instructions (for the reviewer)
 The supported banks need a login, so reviewers should use the built-in demo:
-> The extension reads a Maybank2u or CIMB Clicks (Malaysia) transaction table, which needs a bank login, so use the built-in demo instead. 1) Click the toolbar icon on any page; the "not supported" popup appears. 2) Click the cog and turn off "Only open on supported sites", then Save settings. 3) Click the toolbar icon again; the side panel opens. 4) Press "Demo data". It shows fake accounts and transactions, including duplicates, a transfer, categories and a type warning. Add, Undo and Fix only pretend; nothing is sent anywhere. Press "Exit demo" to leave. No account or API key is needed.
+> The extension reads a Maybank2u or CIMB Clicks (Malaysia) transaction table, which needs a bank login, so use the built-in demo instead. 1) Click the toolbar icon on any page; the "not supported" popup appears. 2) Click the cog and turn off "Only open on supported sites", then Save settings. 3) Click the toolbar icon again; the side panel opens. 4) Press "Demo data". It shows fake accounts and transactions, including duplicates, a transfer, categories and a type warning. Add, Undo, Fix and Delete only pretend; nothing is sent anywhere. Press "Exit demo" to leave. No account or API key is needed.
 
 ## Remote code
 No. All code, including the font, is bundled in the package.

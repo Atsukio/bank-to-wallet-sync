@@ -14,7 +14,6 @@ export async function getSettings() {
     transferRules: [],   // [{ keyword, accountId }]: matching rows are created as transfers to that account
     categoryMemory: {},  // merchant key -> { id, name }: categories the user picked by hand
     ignored: [],         // signatures of rows the user chose never to sync
-    lastAdd: null,       // { groups: [[recordId, mirrorId?]], at }: what the last "Add" created, for Undo
     accountList: [],     // [{ id, name }] last seen Wallet accounts, so Settings can offer them without a request
   });
 }

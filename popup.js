@@ -12,6 +12,7 @@ import {
 
 const $ = (id) => document.getElementById(id);
 const UNDO_WINDOW_MS = 15 * 60e3;
+const RECENT_DAYS = 7; // a page whose last row is this recent is the current one (see analyse)
 const MAX_IGNORED = 2000, MAX_REMEMBERED = 500;
 
 let settings;
@@ -25,9 +26,12 @@ let bank = null;          // { label, digits } the page seems to be showing (see
 let bankBalance = null;   // { label, amount } the balance the bank page shows (see readBalance)
 let accountId = '';       // the Wallet account in use for this page
 let activeTabId = null;
-let lastAdd = null;       // { groups, at, demo? }
+let lastAdd = null;       // { groups, at, tabId, demo? }: in memory only, for the page it was added from (see showUndo)
 let lastSig = '', lastRead = 0, readTimer;
 let walletRange = null; // { from, to } the last Wallet records request covered, shown by Compare
+let walletOnly = [];    // Wallet records on the page's dates that no bank row matched (see analyse)
+const deletedIds = new Set(); // Wallet records deleted from the panel: the API's synced copy can keep returning them a while
+const seenInBank = new Map(); // `${tabId}|${accountId}` → ids of Wallet records a bank row on that tab matched (see analyse)
 
 function setStatus(msg, kind = '') { $('status').textContent = msg; $('status').className = `status ${kind}`; }
 // A status made of sentences, each coloured by its kind: [[text, 'new' | 'likely' | 'check' | 'warn' | ''], …]
@@ -42,6 +46,9 @@ showWhatsNew($('whatsNew')); // after an update: what changed, until "Got it"
 const nameOf = (id) => accounts.find((a) => a.id === id)?.name || 'another account';
 const currencyOf = (id) => accounts.find((a) => a.id === id)?.currencyCode || settings.currency || 'MYR';
 const isFresh = (t) => !t.done && !t.likely && !t.ignored;
+const todayMY = () => new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+const signedAmount = (r) => (r.type === 'income' ? r.amount : -r.amount);
+const total = (list, amountOf) => Math.round(list.reduce((s, x) => s + amountOf(x), 0) * 100) / 100;
 const ready = () => Boolean(settings?.token);
 const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -158,19 +165,43 @@ function renderReconcile() {
   $('adjustConfirm').hidden = true;
   // on a card or loan, "available" is the credit left, not the balance
   const creditLeft = OWED_TYPES.includes(account?.accountType) && /available|tersedia|boleh guna/i.test(bankBalance?.label);
-  $('reconcile').hidden = !bankBalance || !wallet || creditLeft;
-  if ($('reconcile').hidden) return;
+  $('reconcile').hidden = $('reconcileText').hidden = !bankBalance || !wallet || creditLeft;
+  if ($('reconcile').hidden) return renderWhy();
   const money = (v) => Math.abs(v).toLocaleString('en-MY', { style: 'currency', currency: wallet.currency || currencyOf(accountId) });
   const { owed, value } = bankExpected(account);
   adjustBy = Math.round((value - wallet.value) * 100) / 100;
-  const shown = `Bank ${bankBalance.label.toLowerCase()}: ${bankBalance.amount < 0 ? '-' : ''}${money(bankBalance.amount)}${owed ? ' owed' : ''}`;
-  // the bank figure stays neutral; the verdict is green when it matches, amber when it doesn't
+  // the bank's figure as the page shows it (owed on a card); its label ("Outstanding Balance" etc.) is the tooltip
+  const bankShown = owed ? `${money(bankBalance.amount)} owed` : `${bankBalance.amount < 0 ? '-' : ''}${money(bankBalance.amount)}`;
+  $('bankLine').textContent = bankShown;
+  $('reconcile').title = `The bank's ${bankBalance.label.toLowerCase()}`;
+  // Wallet's balance minus the bank's, both as signed balances: up (green) when Wallet is higher, down (red) when lower
+  const diff = -adjustBy;
   const verdict = Object.assign(document.createElement('span'), {
-    className: adjustBy === 0 ? 'verdict ok' : 'verdict off',
-    textContent: adjustBy === 0 ? 'matches Wallet ✓' : `Wallet is ${money(adjustBy)} ${adjustBy < 0 ? 'higher' : 'lower'}`,
+    className: `verdict ${!diff ? 'ok' : diff > 0 ? 'up' : 'down'}`,
+    textContent: !diff ? 'Matches bank ✓' : `${diff > 0 ? '▲' : '▼'} ${fmt(diff)} than bank`,
   });
-  $('reconcileText').replaceChildren(`${shown} · `, verdict);
+  $('reconcileText').replaceChildren(verdict); // under Wallet's column, so it needs no "Wallet:"
   $('adjust').hidden = adjustBy === 0;
+  renderWhy();
+}
+
+// Where a balance difference comes from, as far as this page can tell: bank rows not added yet, and Wallet records the
+// bank page doesn't show (often ones the bank hasn't posted). Shown once the page has been checked against Wallet.
+function renderWhy() {
+  const why = $('reconcileWhy');
+  why.hidden = $('reconcile').hidden || !adjustBy || !txs.length || !walletRange;
+  if (why.hidden) return;
+  const money = (v) => Math.abs(v).toLocaleString('en-MY', { style: 'currency', currency: currencyOf(accountId) });
+  const fresh = txs.filter(isFresh);
+  const freshSum = total(fresh, (t) => t.amount), onlySum = total(walletOnly, signedAmount);
+  // the bank's balance already counts the new rows and doesn't yet count the Wallet-only records
+  const rest = Math.round((adjustBy - freshSum + onlySum) * 100) / 100;
+  const line = (text, title) => Object.assign(document.createElement('div'), { textContent: text, title });
+  const lines = [];
+  if (fresh.length) lines.push(line(`Not in Wallet: ${fresh.length} (${fmt(freshSum)})`, 'New rows on this page, not added to Wallet yet. The bank\'s balance already counts them.'));
+  if (walletOnly.length) lines.push(line(`Not in Bank: ${walletOnly.length} (${fmt(onlySum)})`, 'Wallet records this page doesn\'t show, marked "Not in Bank" in the list. Often ones the bank hasn\'t posted yet.'));
+  if (rest) lines.push(line(`Other: ${money(rest)} (dates not on this page)`, 'Not from anything on this page: usually older history, or a Wallet record that was edited or deleted.'));
+  why.replaceChildren(...lines);
 }
 
 $('adjust').onclick = () => {
@@ -196,9 +227,8 @@ $('adjustYes').onclick = async () => {
     };
     const [result] = demo ? [{ success: true, id: 'demo-adjustment' }] : await createRecords(settings.token, [record]);
     if (!result?.success) return setStatus(`Couldn't add the adjustment: ${result?.error || 'unknown error'}`, 'error');
-    lastAdd = { groups: [[result.id]], at: Date.now(), ...(demo && { demo: true }) };
-    if (!demo) save({ lastAdd });
-    setStatus(demo ? 'Demo: pretended to add the adjustment. Nothing was sent.' : `Added a ${fmt(amount)} balance adjustment. You can undo this for 15 minutes.`, demo ? '' : 'ok');
+    lastAdd = { groups: [[result.id]], at: Date.now(), tabId: activeTabId, ...(demo && { demo: true }) };
+    setStatus(demo ? 'Demo: pretended to add the adjustment. Nothing was sent.' : `Added a ${fmt(amount)} balance adjustment. You can undo this until you leave or reload the page.`, demo ? '' : 'ok');
     if (demo) {
       const account = accounts.find((a) => a.id === accountId);
       accounts = accounts.map((a) => (a === account ? { ...a, balance: { ...a.balance, currentBalance: a.balance.currentBalance + amount } } : a));
@@ -209,10 +239,11 @@ $('adjustYes').onclick = async () => {
 };
 
 function showBalance(b, note = '') {
-  $('balance').hidden = !b;
+  $('balances').hidden = !b;
   if (!b) return;
   const amount = b.value.toLocaleString('en-MY', { style: 'currency', currency: b.currency || settings.currency || 'MYR' });
-  $('balance').textContent = `Wallet balance: ${amount}${note}`;
+  $('walletLbl').textContent = `Wallet${note}`;
+  $('balance').textContent = amount;
 }
 
 $('accountSelect').onchange = async (e) => {
@@ -232,7 +263,7 @@ $('accountSelect').onchange = async (e) => {
 
 async function init() {
   settings = await getSettings();
-  lastAdd = settings.lastAdd;
+  chrome.storage.local.remove('lastAdd'); // versions before 0.7.0 kept the last add across reloads
   $('clear').hidden = !settings.collectPages;
   showUndo();
   if (!settings.token) {
@@ -350,12 +381,24 @@ chrome.storage.onChanged.addListener((changes) => {
 });
 chrome.runtime.onMessage.addListener((msg) => { if (msg?.type === 'b2w-page-changed') readSoon(); });
 chrome.tabs.onUpdated.addListener(async (tabId, info) => {
+  // a reload or a new page in the tab the last add came from ends its Undo (an in-page change, like CIMB's, doesn't)
+  if (info.status === 'loading' && tabId === lastAdd?.tabId && !lastAdd.demo) { lastAdd = null; showUndo(); }
   if (!info.url && info.status !== 'complete') return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id === tabId) readSoon();
 });
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId === lastAdd?.tabId && !lastAdd.demo) { lastAdd = null; showUndo(); }
+  for (const key of seenInBank.keys()) if (key.startsWith(`${tabId}|`)) seenInBank.delete(key);
+});
 // Coming back to the bank tab or window is when Wallet may have changed (e.g. a record was deleted), so check it again.
-chrome.tabs.onActivated.addListener(() => readSoon(true));
+chrome.tabs.onActivated.addListener(async () => {
+  // Undo shows only on the tab it belongs to, even when the switch doesn't lead to a read
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  activeTabId = tab?.id ?? null;
+  showUndo();
+  readSoon(true);
+});
 window.addEventListener('focus', () => { showUndo(); if (Date.now() - lastRead > 5000) readSoon(true); });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -376,7 +419,7 @@ function enterDemo() {
 // Back to real use: the real accounts and balance return, the demo list goes, and the page is read again (if allowed).
 async function exitDemo({ read = true } = {}) {
   leaveDemo();
-  txs = []; walletRecords = []; lastSig = ''; lastAdd = lastAdd?.demo ? null : lastAdd;
+  txs = []; walletRecords = []; walletOnly = []; lastSig = ''; lastAdd = lastAdd?.demo ? null : lastAdd;
   $('results').hidden = true; $('payload').hidden = true;
   setStatus(ready() ? '' : 'Add your Wallet API token in Settings first (the cog above).', ready() ? '' : 'warn');
   updateBadge();
@@ -441,6 +484,7 @@ async function analyse(raw) {
   if (!accountId) {
     setStatus('Choose which Wallet account these transactions belong to (the picker above).', 'warn');
     txs.forEach((t) => { t.selected = false; });
+    walletOnly = [];
     $('coverage').textContent = '';
     return render();
   }
@@ -453,12 +497,25 @@ async function analyse(raw) {
   setStatus('Checking what\'s already in Wallet…');
   try {
     const dates = txs.map((t) => t.date).sort();
-    walletRange = { from: shiftDate(dates[0], -MAX_DATE_LAG), to: shiftDate(dates.at(-1), MAX_DATE_LAG) };
-    const records = demo ? demoRecords(txs) : await existingRecords(settings.token, accountId, walletRange.from, walletRange.to);
-    matchRecords(txs, records);
+    // A page that runs to the last week is the current one: what Wallet has after its last row (up to today) is what
+    // the bank hasn't posted yet. An older page only covers its own dates.
+    const today = todayMY(), current = dates.at(-1) >= shiftDate(today, -RECENT_DAYS);
+    const to = shiftDate(dates.at(-1), MAX_DATE_LAG);
+    walletRange = { from: shiftDate(dates[0], -MAX_DATE_LAG), to: current && today > to ? today : to };
+    const records = demo ? demoRecords(txs) : (await existingRecords(settings.token, accountId, walletRange.from, walletRange.to)).filter((r) => !deletedIds.has(r.id));
+    const unclaimed = matchRecords(txs, records);
+    // Records a bank row on another page of this tab matched (the user paged through) are on the bank's side too.
+    const key = `${activeTabId}|${accountId}`, seen = seenInBank.get(key) ?? new Set();
+    txs.forEach((t) => { if (t.match?.id) seen.add(t.match.id); });
+    seenInBank.set(key, seen);
+    // A page's first and last dates can carry on over the page break, so only the dates inside it count. A current
+    // page's newest date is complete, and runs on to today.
+    const inside = (d) => d > dates[0] && (current ? d <= walletRange.to : d < dates.at(-1));
+    walletOnly = unclaimed.filter((r) => inside(r.date) && !seen.has(r.id))
+      .sort((a, b) => b.date.localeCompare(a.date));
     walletRecords = records;
     showCoverage(dates, records);
-  } catch (e) { return setStatus(e.message, 'error'); }
+  } catch (e) { walletOnly = []; return setStatus(e.message, 'error'); }
 
   // Categories are a convenience: if the rules can't be loaded, records are still added without one.
   let ruleNote = '';
@@ -489,6 +546,7 @@ async function analyse(raw) {
   if (likely - mismatched - earlier) parts.push([`${likely - mismatched - earlier} look like they're already in Wallet (unticked).`, 'likely']);
   if (earlier) parts.push([`${earlier} ${earlier === 1 ? 'is' : 'are'} in Wallet on a nearby date (unticked): "Use bank date" lines ${earlier === 1 ? 'it' : 'them'} up.`, 'likely']);
   if (mismatched) parts.push([`${mismatched} match a Wallet record of the opposite type: use "Fix in Wallet" to correct it.`, 'check']);
+  if (walletOnly.length) parts.push([`${walletOnly.length} in Wallet ${walletOnly.length === 1 ? 'isn\'t' : 'aren\'t'} on the bank page yet ("Not in Bank").`, '']);
   if (ruleNote) parts.push([ruleNote.trim(), 'warn']);
   setStatusParts(parts);
   render();
@@ -659,9 +717,60 @@ function withEditState(li, t) {
 
 function render() {
   $('results').hidden = false;
-  $('list').replaceChildren(...txs.map((t) => withEditState(rowFor(t), t)));
+  const entries = txs.map((t) => ({ date: t.date, li: withEditState(rowFor(t), t) }));
+  // Wallet-only records go among the bank's rows by date, in whichever order the page lists them (newest or oldest first)
+  const ascending = txs.length < 2 || txs[0].date <= txs.at(-1).date;
+  for (const r of ascending ? [...walletOnly].reverse() : walletOnly) {
+    const i = entries.findIndex((e) => (ascending ? e.date > r.date : e.date < r.date));
+    entries.splice(i < 0 ? entries.length : i, 0, { date: r.date, li: walletRow(r) });
+  }
+  $('list').replaceChildren(...entries.map((e) => e.li));
+  renderWhy();
   updateCount();
   updateBadge();
+}
+
+// A Wallet record no bank row matched, read-only: usually one the bank hasn't posted yet; otherwise a record entered
+// twice or on the wrong account. No checkbox (there's nothing to add), so an empty cell keeps the columns aligned.
+function walletRow(r) {
+  const li = document.createElement('li');
+  li.className = 'wallet-only';
+  li.title = "In Wallet, but not on this bank page: usually one the bank hasn't posted yet. If not, check for a record entered twice or on the wrong account.";
+  const amount = signedAmount(r);
+  li.innerHTML = `<span></span><span class="desc"></span><span class="amt ${r.transfer ? 'xfer' : amount < 0 ? 'neg' : 'pos'}">${fmt(amount)}</span>
+      <span class="sub"><span class="date">${r.date}</span>${chip('notbank', 'Not in Bank')}${r.transfer ? chip('likely', 'Transfer') : ''}</span>`;
+  li.querySelector('.desc').textContent = r.note || r.desc || '(no note)';
+  // A transfer's other side would be left behind, so that one is deleted in Wallet itself.
+  if (r.transfer) return li;
+  const acts = document.createElement('span');
+  acts.className = 'acts';
+  // Deleting can't be undone, so the first click only asks.
+  const del = button('Delete', () => {
+    if (del.classList.contains('confirm')) return deleteWalletOnly(r, del);
+    del.classList.add('confirm');
+    del.textContent = 'Delete from Wallet?';
+    setTimeout(() => { del.classList.remove('confirm'); del.textContent = 'Delete'; }, 5000);
+  }, { cls: 'text', title: "Delete this record from Wallet, for one entered twice or on the wrong account. It can't be undone." });
+  acts.append(del);
+  li.append(acts);
+  return li;
+}
+
+async function deleteWalletOnly(r, btn) {
+  if (busy) return;
+  const wasDemo = demo;
+  setBusy(true, { button: btn, label: 'Deleting…' });
+  try {
+    const out = wasDemo ? { deleted: 1, failed: [] } : await deleteRecords(settings.token, [[r.id]]);
+    if (out.failed.length) return setStatus(`Couldn't delete it: ${out.failed[0]}`, 'error');
+    if (!wasDemo) deletedIds.add(r.id);
+    walletOnly = walletOnly.filter((x) => x !== r);
+    const name = r.note || r.desc;
+    setStatus(wasDemo ? 'Demo: pretended to delete it. Nothing was sent.' : `Deleted ${name ? `"${name}"` : 'the record'} from Wallet.`, wasDemo ? '' : 'ok');
+    if (wasDemo) render();
+    else { await refreshAccounts(true); setBusy(false); await reanalyse(); }
+  } catch (e) { setStatus(e.message, 'error'); }
+  finally { setBusy(false); }
 }
 
 async function setIgnored(t, on) {
@@ -889,7 +998,7 @@ $('compare').onclick = async () => {
   $('payload').textContent = [
     `Using Wallet account: ${nameOf(accountId)}. Bank account seen on the page: ${bank ? `"${mask(bank.label)}" last digits ${mask(bank.digits) || 'none'}` : 'not detected'}`,
     'Wallet record fields: ' + JSON.stringify(walletRecords.sample || null),
-    '', `Wallet records (${walletRecords.length}) from ${walletRange?.from || '?'} to ${walletRange?.to || '?'} (the bank's dates plus ${MAX_DATE_LAG} days either side), as read: date  amount  type  description  [source, state, updated]`, ...rows(walletRecords),
+    '', `Wallet records (${walletRecords.length}) from ${walletRange?.from || '?'} to ${walletRange?.to || '?'} (the bank's dates plus ${MAX_DATE_LAG} days either side, and up to today when the page is current), as read: date  amount  type  description  [source, state, updated]`, ...rows(walletRecords),
     '', `Bank transactions (${txs.length}), as read: date  amount  type  description`,
     ...rows(txs.map((t) => ({ date: t.date, amount: Math.abs(t.amount), type: t.amount < 0 ? 'expense' : 'income', desc: t.desc }))),
     ...(pageInfo.length ? ['', 'How the page marks amounts (digits masked):', ...pageInfo] : []),
@@ -922,24 +1031,24 @@ $('sync').onclick = async () => {
     });
     render();
     if (groups.length) {
-      lastAdd = { groups, at: Date.now(), ...(demo && { demo: true }) };
-      if (!demo) save({ lastAdd });
+      lastAdd = { groups, at: Date.now(), tabId: activeTabId, ...(demo && { demo: true }) };
       showUndo();
     }
     const added = batch.length - failed.length;
     if (failed.length) setStatus(`Added ${added}. ${failed.length} failed: ${[...new Set(failed)].join('; ')}`, 'error');
-    else setStatus(demo ? `Demo: pretended to add ${added}. Nothing was sent.` : `Added ${added} to Wallet. You can undo this for 15 minutes.`, demo ? '' : 'ok');
+    else setStatus(demo ? `Demo: pretended to add ${added}. Nothing was sent.` : `Added ${added} to Wallet. You can undo this until you leave or reload the page.`, demo ? '' : 'ok');
     if (!demo && added) refreshAccounts(true);
   } catch (e) { setStatus(e.message, 'error'); }
   finally { setBusy(false); }
 };
 
-// The Undo button shows for 15 minutes after an add. It deletes exactly the records that add created (and the mirror
-// side of any transfer), so nothing else in Wallet is touched.
+// The Undo button belongs to the page the add was made on: it shows only on that tab, and goes when the tab reloads,
+// navigates or closes, or the panel closes (it isn't saved), or after 15 minutes at most. It deletes exactly the records
+// that add created (and the mirror side of any transfer), so nothing else in Wallet is touched.
 function showUndo() {
   const live = lastAdd && Date.now() - lastAdd.at < UNDO_WINDOW_MS;
-  if (lastAdd && !live) { lastAdd = null; if (settings?.lastAdd) save({ lastAdd: null }); }
-  $('undo').hidden = !live;
+  if (lastAdd && !live) lastAdd = null;
+  $('undo').hidden = !live || !(lastAdd.demo || lastAdd.tabId === activeTabId);
   if (live) $('undo').textContent = `Undo last add (${lastAdd.groups.length})`;
 }
 
@@ -954,7 +1063,6 @@ $('undo').onclick = async () => {
       setStatus(`Removed ${out.deleted}. ${out.failed.length} could not be removed: ${[...new Set(out.failed)].join('; ')}`, 'error');
     } else {
       lastAdd = null;
-      if (!wasDemo) save({ lastAdd: null });
       setStatus(wasDemo ? 'Demo: pretended to undo. Nothing was sent.' : `Removed ${out.deleted} record${out.deleted === 1 ? '' : 's'} from Wallet.`, wasDemo ? '' : 'ok');
       if (wasDemo) txs.forEach((t) => { if (t.done && !t.match) { t.done = false; t.selected = true; } });
     }

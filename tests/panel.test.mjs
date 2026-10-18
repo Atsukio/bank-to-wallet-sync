@@ -8,6 +8,8 @@ const open = async (patch = {}, file) => {
   return { env, page: await newPanel(browser, server, env, file) };
 };
 const settle = (ms = 700) => wait(ms);
+// the balance explanation, one line per part, with non-breaking spaces made plain
+const whyLines = (page) => page.evaluate(() => [...document.querySelectorAll("#reconcileWhy > div")].map((d) => d.textContent.replace(/\u00a0/g, " ")).join("\n"));
 
 // ---------------------------------------------------------------- reading, account picker, balance, badge
 {
@@ -295,27 +297,43 @@ const settle = (ms = 700) => wait(ms);
   const created = await log(page, 'created');
   check('add: both rows are created in one request batch', created.length === 2);
   check('add: Undo appears', await visible(page, '#undo'));
-  check('add: last add is saved for later (with the mirror record)', JSON.stringify((await store(page)).lastAdd?.groups) === JSON.stringify([['new-1', 'mirror-1'], ['new-2']]), JSON.stringify((await store(page)).lastAdd));
+  check('add: the last add is not saved to storage (Undo belongs to this page)', (await store(page)).lastAdd === undefined, JSON.stringify((await store(page)).lastAdd));
   await page.evaluate(() => { window.__t.env.records = []; });
   await page.click('#undo'); await settle();
   const deleted = await log(page, 'deleted');
   check('undo: deletes exactly what was added, a transfer together with its mirror', deleted.length === 1 && JSON.stringify(deleted[0]) === JSON.stringify(['new-1', 'mirror-1', 'new-2']), JSON.stringify(deleted));
-  check('undo: button disappears and the saved add is cleared', !(await visible(page, '#undo')) && (await store(page)).lastAdd === null);
+  check('undo: button disappears', !(await visible(page, '#undo')));
   check('undo: the rows are new again afterwards', (await rows(page)).every((x) => !x.chips.includes('In Wallet')));
   await page.close();
 }
 {
-  // an add made earlier (a previous session) can still be undone within the window; an old one cannot
-  const fresh = { groups: [['old-1']], at: Date.now() - 60e3 };
-  const stale = { groups: [['old-2']], at: Date.now() - 20 * 60e3 };
-  const a = await open({ settings: { token: 't', accountId: 'a1', lastAdd: fresh } });
+  // an add saved by an older version is not offered when the panel opens, and is removed from storage
+  const { page } = await open({ settings: { token: 't', accountId: 'a1', lastAdd: { groups: [['old-1']], at: Date.now() - 60e3 } } });
   await settle();
-  check('undo: an add from a minute ago is still undoable after reopening', await visible(a.page, '#undo'));
+  check('undo: an add from before the panel opened is not offered (and the old saved one is dropped)', !(await visible(page, '#undo')) && (await store(page)).lastAdd === undefined);
+  await page.close();
+}
+{
+  // Undo belongs to the page it was added on
+  const a = await open();
+  await settle();
+  await a.page.click('#sync'); await settle();
+  check('undo: offered after an add', await visible(a.page, '#undo'));
+  await a.page.evaluate(() => window.__fire('updated', 1, { status: 'loading' })); await settle(200);
+  check('undo: a reload of the page ends it', !(await visible(a.page, '#undo')));
   await a.page.close();
-  const b = await open({ settings: { token: 't', accountId: 'a1', lastAdd: stale } });
+  const { page } = await open();
   await settle();
-  check('undo: an add older than 15 minutes is not offered (and is dropped)', !(await visible(b.page, '#undo')) && (await store(b.page)).lastAdd === null);
-  await b.page.close();
+  await page.click('#sync'); await settle();
+  await page.evaluate(() => { window.__t.env.tabId = 2; window.__fire('activated', { tabId: 2 }); }); await settle(200);
+  check('undo: not shown on another tab', !(await visible(page, '#undo')));
+  await page.evaluate(() => { window.__t.env.tabId = 1; window.__fire('activated', { tabId: 1 }); }); await settle(200);
+  check('undo: shown again back on its tab', await visible(page, '#undo'));
+  await page.evaluate(() => window.__fire('updated', 1, { status: 'complete' })); await settle();
+  check('undo: an in-page change (no reload) keeps it', await visible(page, '#undo'));
+  await page.evaluate(() => window.__fire('tabRemoved', 1)); await settle(200);
+  check('undo: closing the tab ends it', !(await visible(page, '#undo')));
+  await page.close();
 }
 
 // ---------------------------------------------------------------- opposite type, ignore, flip
@@ -443,7 +461,10 @@ const settle = (ms = 700) => wait(ms);
 {
   const { page } = await open({ bankBalance: { label: "Current Balance", amount: 1000 } });
   await settle();
-  check("balance check: shows the bank balance and the difference", (await text(page, "#reconcileText")).replace(/ /g, " ") === "Bank current balance: RM 1,000.00 · Wallet is RM 234.50 higher", await text(page, "#reconcileText"));
+  const plain = async (sel) => (await text(page, sel)).replace(/ /g, " ");
+  check("balance check: Wallet's balance beside the bank's", (await plain("#walletLbl")) === "Wallet" && (await plain("#balance")) === "RM 1,234.50" && (await plain("#bankLine")) === "RM 1,000.00" && (await plain("#reconcile .lbl")) === "Bank", (await text(page, "#balance")) + " / " + (await text(page, "#bankLine")));
+  check("balance check: Wallet higher is a green up arrow under Wallet", (await plain("#reconcileText")) === "▲ +RM 234.50 than bank" && await page.evaluate(() => document.querySelector("#reconcileText .verdict").classList.contains("up")), await text(page, "#reconcileText"));
+  check("balance check: says what on the page explains the difference", (await whyLines(page)) === "Not in Wallet: 1 (-RM 10.00)\nOther: RM 224.50 (dates not on this page)", await text(page, "#reconcileWhy"));
   check("balance check: offers Adjust", await visible(page, "#adjust"));
   await page.click("#adjust");
   const ask = await text(page, "#adjustText");
@@ -453,8 +474,8 @@ const settle = (ms = 700) => wait(ms);
   await page.click("#adjustYes"); await settle();
   const [made] = await log(page, "created");
   check("adjust: one record for the difference, reconciled, with a clear note", made?.amount.value === -234.5 && made.recordState === "reconciled" && made.note.startsWith("Balance adjustment to match the bank's current balance") && made.accountId === "a1", JSON.stringify(made));
-  check("adjust: it can be undone like any add", await visible(page, "#undo") && JSON.stringify((await store(page)).lastAdd?.groups) === JSON.stringify([["new-1"]]));
-  check("adjust: afterwards the balances match", (await text(page, "#reconcileText")).endsWith("matches Wallet ✓") && !(await visible(page, "#adjust")), await text(page, "#reconcileText"));
+  check("adjust: it can be undone like any add", await visible(page, "#undo") && (await text(page, "#undo")) === "Undo last add (1)", await text(page, "#undo"));
+  check("adjust: afterwards the balances match", (await text(page, "#reconcileText")) === "Matches bank ✓" && !(await visible(page, "#adjust")), await text(page, "#reconcileText"));
   await page.close();
 }
 {
@@ -463,7 +484,72 @@ const settle = (ms = 700) => wait(ms);
   env.settings = { ...env.settings, accountMap: { "d:1111": "a2" } };
   const page = await newPanel(browser, server, env);
   await settle();
-  check("balance check: a card's outstanding balance is owed, so it matches Wallet's negative balance", (await text(page, "#reconcileText")).replace(/ /g, " ") === "Bank outstanding balance: RM 500.00 owed · matches Wallet ✓", await text(page, "#reconcileText"));
+  const plain = async (sel) => (await text(page, sel)).replace(/ /g, " ");
+  check("balance check: a card's outstanding balance is owed, so it matches Wallet's negative balance", (await plain("#bankLine")) === "RM 500.00 owed" && (await text(page, "#reconcileText")) === "Matches bank ✓", await text(page, "#reconcileText"));
+  check("balance check: no explanation when it matches", !(await visible(page, "#reconcileWhy")));
+  await page.close();
+}
+{
+  // Bank owes 525 = Wallet's 500 + the new 30 - the 5 Wallet has that the bank hasn't posted.
+  const rec = (id, recordDate, amount, note) => ({ id, accountId: "a2", recordDate, amount: { value: amount }, recordType: "expense", note });
+  const env = {
+    ...baseEnv(), bankBalance: { label: "Outstanding Balance", amount: 525 }, bank: { label: "Card", digits: "1111" },
+    rows: [{ date: "2026-10-01", desc: "SHOP A", amount: -30 }, { date: "2026-10-02", desc: "SHOP B", amount: -15 }, { date: "2026-10-03", desc: "SHOP C", amount: -12 }],
+    records: [rec("w1", "2026-10-02T04:00:00.000Z", -15, "SHOP B"), rec("w2", "2026-10-02T06:00:00.000Z", -5, "Snacks"), rec("w3", "2026-09-30T04:00:00.000Z", -7, "Before the page"),
+      rec("w4", "2026-10-03T04:00:00.000Z", -12, "SHOP C"), rec("w5", "2026-10-03T06:00:00.000Z", -4, "Last day, may be on the next page"), rec("w6", "2026-10-01T06:00:00.000Z", -6, "First day, may be on the previous page")],
+  };
+  env.accounts = env.accounts.map((a) => (a.id === "a2" ? { ...a, accountType: "CreditCard" } : a));
+  env.settings = { ...env.settings, accountMap: { "d:1111": "a2" } };
+  const page = await newPanel(browser, server, env);
+  await settle();
+  const plain = async (sel) => (await text(page, sel)).replace(/ /g, " ");
+  check("balance check: on a card, owing less than the bank is Wallet higher (up arrow)", (await plain("#bankLine")) === "RM 525.00 owed" && (await plain("#reconcileText")) === "▲ +RM 25.00 than bank", await text(page, "#reconcileText"));
+  check("balance check: new rows and Wallet-only records explain the difference, with nothing left over", (await whyLines(page)) === "Not in Wallet: 1 (-RM 30.00)\nNot in Bank: 1 (-RM 5.00)", await text(page, "#reconcileWhy"));
+  const walletRows = () => page.evaluate(() => [...document.querySelectorAll("#list li.wallet-only")].map((li) => li.querySelector(".desc").textContent + "|" + [...li.querySelectorAll(".chip")].map((c) => c.textContent).join(",")));
+  check("wallet only: the unmatched record inside the page's dates is in the list as Not in Bank, not ones before or on its first and last dates (they may be on the next page)", JSON.stringify(await walletRows()) === JSON.stringify(["Snacks|Not in Bank"]), JSON.stringify(await walletRows()));
+  check("wallet only: it sits among the bank rows by date", (await page.evaluate(() => [...document.querySelectorAll("#list .desc")].map((d) => d.textContent).join("|"))) === "SHOP A|SHOP B|Snacks|SHOP C");
+  check("wallet only: the summary mentions it", (await text(page, "#status")).includes(`1 in Wallet isn't on the bank page yet ("Not in Bank").`), await text(page, "#status"));
+  await page.close();
+}
+{
+  // On a current page, Wallet is checked up to today, so what the bank hasn't posted yet shows.
+  const day = (n) => new Date(Date.now() + 8 * 3600e3 + n * 864e5).toISOString().slice(0, 10);
+  const { page } = await open({
+    rows: [{ date: day(-6), desc: "SHOP C", amount: -12 }],
+    records: [{ id: "w9", accountId: "a1", recordDate: `${day(0)}T04:00:00.000Z`, amount: { value: -8 }, recordType: "expense", note: "Logged today" }],
+  });
+  await settle();
+  const walletRows = () => page.evaluate(() => [...document.querySelectorAll("#list li.wallet-only")].map((li) => li.querySelector(".desc").textContent + "|" + [...li.querySelectorAll(".chip")].map((c) => c.textContent).join(",")));
+  check("wallet only: a current page lists today's Wallet record the bank hasn't posted", JSON.stringify(await walletRows()) === JSON.stringify(["Logged today|Not in Bank"]), JSON.stringify(await walletRows()));
+  await page.click("#list li.wallet-only button"); await settle(300);
+  check("wallet only: Delete asks first and sends nothing", (await text(page, "#list li.wallet-only button")) === "Delete from Wallet?" && (await log(page, "deleted")).length === 0);
+  await page.click("#list li.wallet-only button"); await settle();
+  // the fake Wallet keeps returning the record, like the API's synced copy can for a while
+  check("wallet only: the second click deletes that record and it leaves the list", JSON.stringify(await log(page, "deleted")) === JSON.stringify([["w9"]]) && JSON.stringify(await walletRows()) === "[]", JSON.stringify(await log(page, "deleted")) + JSON.stringify(await walletRows()));
+  check("wallet only: says it was deleted", (await text(page, "#status")).includes('Deleted "Logged today" from Wallet.'), await text(page, "#status"));
+  await page.close();
+}
+{
+  // Paging: page 1 (current) then page 2, which is recent enough to count as current too. What page 1 matched isn't
+  // "Not in Bank" on page 2.
+  const day = (n) => new Date(Date.now() + 8 * 3600e3 + n * 864e5).toISOString().slice(0, 10);
+  const rec = (id, d, amount, note) => ({ id, accountId: "a1", recordDate: `${d}T04:00:00.000Z`, amount: { value: amount }, recordType: "expense", note });
+  const { page } = await open({
+    rows: [{ date: day(-2), desc: "PAGE ONE A", amount: -11 }, { date: day(-1), desc: "PAGE ONE B", amount: -12 }],
+    records: [rec("p1", day(-2), -11, "PAGE ONE A"), rec("p2", day(-1), -12, "PAGE ONE B"), rec("p3", day(-5), -13, "PAGE TWO A"), rec("p4", day(-4), -14, "PAGE TWO B")],
+  });
+  await settle();
+  const walletRows = () => page.evaluate(() => [...document.querySelectorAll("#list li.wallet-only")].map((li) => li.querySelector(".desc").textContent));
+  await page.evaluate((rows) => { window.__t.env.rows = rows; window.__fire("message", { type: "b2w-page-changed" }); },
+    [{ date: day(-5), desc: "PAGE TWO A", amount: -13 }, { date: day(-4), desc: "PAGE TWO B", amount: -14 }]);
+  await settle();
+  check("wallet only: records matched on the page before aren't Not in Bank on the next page", JSON.stringify(await walletRows()) === "[]", JSON.stringify(await walletRows()));
+  await page.close();
+}
+{
+  const { page } = await open({});
+  await settle();
+  check("wallet only: none when every Wallet record is matched", (await page.evaluate(() => document.querySelectorAll("#list li.wallet-only").length)) === 0);
   await page.close();
 }
 {

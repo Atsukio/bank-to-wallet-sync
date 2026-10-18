@@ -71,7 +71,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
   await page.setViewport({ width: 420, height: 900 });
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: dark ? 'dark' : 'light' }]);
   await page.evaluateOnNewDocument((e) => {
-    const t = (window.__t = { env: e, scans: 0, watchers: 0, fetches: [], created: [], deleted: [], patched: [], badge: [], globalBadge: [], opened: 0, mirror: 0, requested: [], removed: [], listeners: { message: [], updated: [], activated: [], storage: [], permAdded: [], permRemoved: [] } });
+    const t = (window.__t = { env: e, scans: 0, watchers: 0, fetches: [], created: [], deleted: [], patched: [], badge: [], globalBadge: [], opened: 0, mirror: 0, requested: [], removed: [], listeners: { message: [], updated: [], activated: [], tabRemoved: [], storage: [], permAdded: [], permRemoved: [] } });
     const store = { ...e.settings };
     t.store = store;
     const json = (body) => ({ ok: true, status: 200, headers: new Headers(e.headers), json: async () => body });
@@ -102,7 +102,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
       return { ok: false, status: 404, headers: new Headers(), json: async () => ({ message: 'not found' }) };
     };
     const ev = (name) => ({ addListener: (f) => t.listeners[name].push(f) });
-    const tab = () => ({ id: 1, url: t.env.tabUrl });
+    const tab = () => ({ id: t.env.tabId ?? 1, url: t.env.tabUrl });
     window.chrome = {
       storage: {
         local: {
@@ -122,7 +122,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
         onChanged: ev('storage'),
       },
       runtime: { openOptionsPage() { t.opened++; }, onMessage: ev('message'), getManifest: () => ({ version: e.version || '0.3.0' }) },
-      tabs: { query: async () => [tab()], onUpdated: ev('updated'), onActivated: ev('activated') },
+      tabs: { query: async () => [tab()], onUpdated: ev('updated'), onActivated: ev('activated'), onRemoved: ev('tabRemoved') },
       // Optional host access: everything is granted unless listed in env.noAccess; request() grants it unless
       // env.denyAccess. Requests and removals are logged.
       permissions: {
@@ -159,7 +159,7 @@ export async function newPanel(browser, server, env, file = 'popup.html', { dark
 }
 
 // Convenience readers for the panel's state.
-export const rows = (page) => page.evaluate(() => [...document.querySelectorAll('#list li')].map((li) => ({
+export const rows = (page) => page.evaluate(() => [...document.querySelectorAll('#list li:not(.wallet-only)')].map((li) => ({
   desc: li.querySelector('.desc').textContent,
   amount: li.querySelector('.amt').textContent,
   cls: li.className,
