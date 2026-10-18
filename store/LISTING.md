@@ -62,7 +62,7 @@ Copy transactions from the supported bank page the user is viewing (currently Ma
 
 ## Test instructions (for the reviewer)
 The supported banks need a login, so reviewers should use the built-in demo:
-> The extension reads a Maybank2u or CIMB Clicks (Malaysia) transaction table, which needs a bank login, so use the built-in demo instead. 1) Click the toolbar icon on any page; the "not supported" popup appears. 2) Click the cog and turn off "Only open on supported sites", then Save settings. 3) Click the toolbar icon again; the side panel opens. 4) Press "Demo data". It shows fake accounts and transactions, including duplicates, a transfer, categories and a type warning. Add, Undo, Fix and Delete only pretend; nothing is sent anywhere. Press "Exit demo" to leave. No account or API key is needed.
+> The supported bank pages need a login, so please use the built-in demo. 1) Click the toolbar icon on any page; a "not supported" popup appears. 2) Click the cog, turn off "Only open on supported sites" and Save settings. 3) Click the icon again; the side panel opens. 4) Press "Demo data" for fake accounts and transactions. Add, Undo, Fix and Delete only pretend; nothing is sent. "Exit demo" leaves the demo. No account or API key is needed.
 
 ## Remote code
 No. All code, including the font, is bundled in the package.
