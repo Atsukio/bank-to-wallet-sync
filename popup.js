@@ -502,7 +502,9 @@ async function analyse(raw) {
     const today = todayMY(), current = dates.at(-1) >= shiftDate(today, -RECENT_DAYS);
     const to = shiftDate(dates.at(-1), MAX_DATE_LAG);
     walletRange = { from: shiftDate(dates[0], -MAX_DATE_LAG), to: current && today > to ? today : to };
-    const records = demo ? demoRecords(txs) : (await existingRecords(settings.token, accountId, walletRange.from, walletRange.to)).filter((r) => !deletedIds.has(r.id));
+    const fetched = demo ? demoRecords(txs) : await existingRecords(settings.token, accountId, walletRange.from, walletRange.to);
+    // keep .meta (sync state) on the filtered list
+    const records = Object.assign(fetched.filter((r) => !deletedIds.has(r.id)), { meta: fetched.meta });
     const unclaimed = matchRecords(txs, records);
     // Records a bank row on another page of this tab matched (the user paged through) are on the bank's side too.
     const key = `${activeTabId}|${accountId}`, seen = seenInBank.get(key) ?? new Set();
@@ -766,9 +768,10 @@ async function deleteWalletOnly(r, btn) {
     if (!wasDemo) deletedIds.add(r.id);
     walletOnly = walletOnly.filter((x) => x !== r);
     const name = r.note || r.desc;
-    setStatus(wasDemo ? 'Demo: pretended to delete it. Nothing was sent.' : `Deleted ${name ? `"${name}"` : 'the record'} from Wallet.`, wasDemo ? '' : 'ok');
     if (wasDemo) render();
     else { await refreshAccounts(true); setBusy(false); await reanalyse(); }
+    // after the re-read, whose own summary would replace it
+    setStatus(wasDemo ? 'Demo: pretended to delete it. Nothing was sent.' : `Deleted ${name ? `"${name}"` : 'the record'} from Wallet.`, wasDemo ? '' : 'ok');
   } catch (e) { setStatus(e.message, 'error'); }
   finally { setBusy(false); }
 }
