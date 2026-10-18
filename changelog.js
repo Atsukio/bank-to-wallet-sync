@@ -3,6 +3,14 @@
 // a release without an entry updates quietly.
 export const CHANGELOG = [
   {
+    version: '0.7.0',
+    items: [
+      'Wallet records the bank page doesn\'t show yet are listed as "Not in Bank", and you can delete one that was entered twice or on the wrong account.',
+      'The balance check is clearer: Wallet and Bank side by side, an arrow showing whether Wallet is higher or lower, and what on the page explains the difference.',
+      'Undo only shows on the page you added from, and goes away when you reload or leave it.',
+    ],
+  },
+  {
     version: '0.6.0',
     items: [
       'Merge, Replace, Fix and Use bank date no longer lock the panel: click as many as you like and they\'re sent in the background.',
