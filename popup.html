@@ -6,7 +6,7 @@
   h1 { margin: 0; line-height: 0; }
   h1 img { image-rendering: pixelated; } /* the icon is pixel art: keep it crisp when scaled down */
   /* compact buttons for the narrow panel (the shared style.css sizes suit the roomier Settings page) */
-  button { padding: 4px 12px; font-size: 13px; line-height: 18px; border-radius: 16px; }
+  button { min-height: 24px; padding: 4px 12px; font-size: 13px; line-height: 18px; border-radius: 16px; } /* 24px: the smallest target WCAG 2.2 allows */
   button.icon-btn { width: 36px; height: 36px; padding: 0; }
   .actions button { padding: 6px 14px; }
   .demo-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; padding: 6px 6px 6px 12px; border-radius: 12px; background: var(--md-tertiary-container); color: var(--md-on-tertiary-container); font-size: 14px; line-height: 20px; letter-spacing: .25px; }
@@ -57,10 +57,14 @@
   .status-row button { flex: none; padding: 4px 12px; font-size: 13px; }
   ul { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--md-outline-variant); }
   li { display: grid; grid-template-columns: 18px 1fr auto; column-gap: 12px; row-gap: 2px; align-items: center; padding: 8px 2px; border-bottom: 1px solid var(--md-outline-variant); }
+  li input[type=checkbox], #toggleAll { width: 18px; height: 18px; margin: 0; } /* M3 checkbox size; the browser's 13px is hard to hit */
+  #toggleAll { vertical-align: -4px; }
+  li input[type=checkbox]:disabled { opacity: .38; } /* M3 disabled: tells settled rows from ones you can tick */
   li input[type=checkbox] { grid-row: 1 / span 2; align-self: center; }
   .sub { grid-column: 2 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; line-height: 20px; letter-spacing: .25px; }
-  li.done, li.ignored { opacity: .5; }
-  li.likely .desc, li.likely .date { opacity: .7; }
+  /* settled rows are muted with M3's variant text colour, not opacity, so they stay readable (4.5:1) */
+  li.done :is(.desc, .amt, .date, .cat, .unsure), li.ignored :is(.desc, .amt, .date, .cat, .unsure),
+  li.likely :is(.desc, .date) { color: var(--md-on-surface-variant); }
   .match { grid-column: 2 / -1; font-size: 14px; line-height: 20px; letter-spacing: .25px; margin-top: -4px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .match span { overflow-wrap: anywhere; }
   .match > span:first-child { flex: 1; } /* the text takes the room, so several buttons sit together on the right */
@@ -94,7 +98,7 @@
 </style></head>
 <body>
   <div class="progress" id="progress" role="progressbar" aria-label="Working" hidden></div>
-  <div id="app">
+  <main id="app">
   <header>
     <h1><img src="icons/icon-128.png" width="32" height="32" alt="Bank to Wallet Sync" title="Bank to Wallet Sync"></h1>
     <button class="icon-btn" id="openSettings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.59.22L2.74 8.87a.47.47 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg></button>
@@ -141,7 +145,7 @@
     <div class="actions"><button class="primary grow" id="sync">Add to Wallet</button></div>
     <pre id="payload" hidden></pre>
   </section>
-  </div>
+  </main>
 
   <script type="module" src="popup.js"></script>
 </body></html>
