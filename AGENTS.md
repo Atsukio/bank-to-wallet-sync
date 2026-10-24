@@ -4,6 +4,19 @@ Chrome/Edge (Manifest V3) extension: reads the transaction table on a supported 
 
 **Shared rules first:** this file covers only what is specific to this extension. The rules common to all of the owner's extensions (design, permissions, privacy, releases, commit messages, Windows gotchas, working with the owner) are in `../extension-kit/CONVENTIONS.md` (imported by `CLAUDE.md`). Where the two differ, this file wins.
 
+## Working here (read this first)
+The steps for every task, whichever model or person does it. The sections after this are reference: read the one for the area you touch.
+
+1. **Understand before editing.** Read the section below for the area, then the code (in `popup.js`, its section comments first). Find every caller before changing a function's shape. Never guess Wallet API fields: read the spec (see Wallet API notes).
+2. **Make the smallest change that fits.** Match the surrounding code. No new dependencies, files or abstractions unless asked; don't refactor or reformat code outside the task.
+3. **Test as you go.** Run `npm test -- <name>` for the area (`logic`, `scanner`, `background`, `panel`, `pages`, `build`), then the full `npm test` before calling it done. Add or update a test for each behaviour change. If the browser won't launch, set `CHROME_PATH` to Brave (`C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe`).
+4. **Look at UI changes** in light and dark, with `npm run screenshots` or the `chrome-devtools` MCP (see Testing).
+5. **Done means** the tests pass and, in the same change, this file is updated if it describes what changed, and `PRIVACY.md` / `store/LISTING.md` are updated if data handling or permissions changed. Report what you ran and the result, and say plainly what you could not verify.
+6. **Stop and ask** before adding a permission or host permission, changing what is stored or sent, renaming or dropping a settings key, editing `../extension-kit`, committing or pushing, or when the request is ambiguous. One short question beats a wrong guess.
+7. **Never** use or repeat real bank or Wallet data (Demo data and synthetic fixtures only), open `.env` files, point a browser tool at the real bank sites or Wallet, or hand-edit the generated colour block in `style.css`.
+
+When this file and the code disagree, trust the code and tests, then fix this file.
+
 ## Layout
 Plain ES modules, no bundler, **no runtime dependencies**, no build step: load the folder unpacked at `chrome://extensions`. `package.json` exists only for tests and release tooling (`"type": "module"`).
 
@@ -30,6 +43,7 @@ Plain ES modules, no bundler, **no runtime dependencies**, no build step: load t
 | `PRIVACY.md` | Privacy policy (its URL goes in the Web Store dashboard). Keep it true to what the code does. |
 | `dist/` | Built upload zip, git-ignored (as the kit says): `npm run build` recreates it, and CI builds it on every push. |
 | `CLAUDE.md` | Imports `../extension-kit/CONVENTIONS.md` and this file. Not shipped. |
+| `.mcp.json` | Claude Code config for Google's `chrome-devtools` MCP server (see Testing). Not shipped. |
 
 ## Commands
 ```
@@ -125,6 +139,8 @@ Browser for tests: Edge/Chrome are found automatically on Windows, macOS and Lin
 
 Not coverable headless, so verify in a real browser when touching them: the service worker and side-panel enable/disable, the in-page watcher on real pagination, `detectAccount` on the real page, and the live Wallet calls for transfers, delete and categories.
 
+**Real browser through MCP** (`.mcp.json`): Google's `chrome-devtools` server, pinned to a version, with a throwaway profile (`--isolated`: no logins, no Wallet token) and telemetry off. It launches `CHROME_PATH`, else Brave. It can `install_extension` (absolute path of this folder), `reload_extension` after edits, open `chrome-extension://<id>/popup.html` or `options.html` as a tab, read console messages, see the service worker, click, type and take screenshots. It cannot open the real side panel (Chrome needs a user click), so check the panel as a tab. The bank sites and `*.budgetbakers.com` are blocked with `--blockedUrlPattern`, so test with **Demo data** or a local synthetic page like the tests use. Do not remove those blocks, and keep this config even where a skill suggests a plainer one (`@latest`, no blocks). To upgrade the server, change the pinned version on purpose after reading its changelog. The owner also has Google's `chrome-devtools` and `a11y-debugging` skills in `~/.claude/skills` (copied from the same release; `SOURCE.txt` says which); update them with the server.
+
 ## Releasing to the Web Store
 1. Bump `version` in `manifest.json` (the store rejects a re-upload with the same version).
 2. `npm test`, then `npm run build -- --clean`: `tools/build.cjs` writes and verifies the zip (the kit's packaging rules apply; the 0.1.0/0.1.1 zips were tar archives).
@@ -144,7 +160,8 @@ The shared rules are in `CONVENTIONS.md`. Here: they test on the real Maybank2u 
 ## Status as of 2026-10-18 (v0.7.0)
 - Released in git: v0.1.1, v0.1.2, v0.2.0, v0.3.0, v0.4.0, v0.5.0, v0.5.1, v0.6.0, v0.6.1 and v0.7.0 (`chore(release): v0.7.0`; "Not in Bank" records with Delete, the two-column balance check, per-page Undo, the icon as the panel title). 0.3.0 and 0.4.0 were never uploaded: 0.3.0 made CIMB Clicks a required host (which would have disabled the extension for existing users), 0.4.0 added the What's new card; 0.5.0 makes CIMB Clicks optional; 0.5.1 stops a quiet update from flashing the NEW badge; 0.6.0 (background record edits, sticky bars, colour coding, generic demo data) was rejected by the store for a 142-character manifest description (limit 132, now a build test); 0.6.1 fixes that; 0.7.0 is the one to upload now, with new store screenshots and the listing and privacy text that mention Delete. 0.4.0 to 0.5.1 have no changelog entry of their own, so users coming from 0.2.0 see the 0.6.0 and 0.3.0 cards. The 0.1.0/0.1.1 zips were tar archives (see Releasing); zips are no longer committed.
 - Web Store: the owner is submitting it. Upload `dist/bank-to-wallet-sync-<version>.zip` (build it first); listing text, data-usage answers and reviewer test instructions (use Demo data; turn off "Only open on supported sites" first) are in `store/LISTING.md`.
-- Unverified in a real browser or against the live Wallet API: the service worker behaviours, the optional-access prompt (popup, panel, Settings), `detectAccount` on Maybank2u and CIMB, transfers, Undo (DELETE), `GET /categories`, Fix in Wallet (PATCH amount), Use bank date (PATCH recordDate), Merge/Replace (PATCH note) and the balance check/Adjust on the real pages. Treat them cautiously on first use (one transaction).
+- Seen in a real browser (Brave through the MCP, 2026-10-24): the extension loads unpacked and a first install opens Settings.
+- Unverified in a real browser or against the live Wallet API: the other service worker behaviours, the optional-access prompt (popup, panel, Settings), `detectAccount` on Maybank2u and CIMB, transfers, Undo (DELETE), `GET /categories`, Fix in Wallet (PATCH amount), Use bank date (PATCH recordDate), Merge/Replace (PATCH note) and the balance check/Adjust on the real pages. Treat them cautiously on first use (one transaction).
 - Not done: more banks (needs sample pages from each bank; the scanner is header-based so a table-style bank may mostly need a `sites.js` entry with `optional: true` and its origin in `optional_host_permissions`), Firefox.
 - Store images are generated from demo data; rerun `npm run screenshots` after visible UI changes.
 - The licence holder is "Atsukio" (MIT). "Maybank" appears in the store listing with a non-affiliation disclaimer; reviewers may still flag it.
