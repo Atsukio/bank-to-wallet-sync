@@ -603,35 +603,74 @@ function line(cls, text, ...buttons) {
   return row;
 }
 
-function categorySelect(t) {
-  const select = document.createElement('select');
-  select.className = 'mini';
-  select.setAttribute('aria-label', 'Category');
-  select.append(new Option('Uncategorised', ''));
-  const groups = new Map();
-  for (const c of categories) {
-    if (!groups.has(c.group)) groups.set(c.group, Object.assign(document.createElement('optgroup'), { label: c.group || 'Other' }));
-    groups.get(c.group).append(new Option(c.name, c.id));
-  }
-  select.append(...groups.values());
-  select.value = t.rule?.category?.id || '';
-  select.onchange = () => {
-    const picked = categories.find((c) => c.id === select.value);
-    t.rule = { manual: true, category: picked ? { id: picked.id, name: picked.name } : null, labels: [] };
-    rememberCategory(t, t.rule.category);
-    render();
-  };
-  select.onblur = () => render();
-  return select;
+// The open Change / Transfer picker. The list isn't rebuilt under it (see render): the panel re-reads when it gains
+// focus, which the first click into it does, and the picker would vanish as if the click never happened.
+let picker = null;
+
+function openPicker(btn, el) {
+  picker = el;
+  btn.replaceWith(el);
+  el.focus();
+  el.onblur = () => closePicker(el);
 }
+
+function closePicker(el) {
+  if (picker !== el) return;
+  picker = null;
+  render();
+}
+
+// A re-read may have replaced the row while its picker was open, so a choice goes to the row now in the list.
+const liveRow = (t) => txs.find((x) => x.sig === t.sig) || t;
+
+// A text box filtering the categories as you type (a datalist, so the browser draws the list). Each option's text is
+// the category name, with its group added only where two groups share a name.
+function categorySelect(t) {
+  const input = document.createElement('input');
+  input.className = 'mini';
+  input.setAttribute('aria-label', 'Category');
+  input.placeholder = 'Type to find a category';
+  const byText = new Map([['Uncategorised', null]]);
+  const counts = new Map();
+  for (const c of categories) counts.set(c.name, (counts.get(c.name) || 0) + 1);
+  for (const c of categories) byText.set(counts.get(c.name) > 1 ? `${c.name} (${c.group || 'Other'})` : c.name, c);
+  const list = $('categoryOptions') || document.body.appendChild(Object.assign(document.createElement('datalist'), { id: 'categoryOptions' }));
+  list.replaceChildren(...[...byText].map(([text, c]) => Object.assign(new Option(text), c?.group ? { label: c.group } : {})));
+  input.setAttribute('list', list.id);
+  const pick = (text) => {
+    if (!byText.has(text)) return false;
+    const c = byText.get(text), row = liveRow(t);
+    row.rule = { manual: true, category: c ? { id: c.id, name: c.name } : null, labels: [] };
+    rememberCategory(row, row.rule.category);
+    input.blur();
+    return true;
+  };
+  // A choice from the list arrives as an input event that isn't typing
+  input.oninput = (e) => { if (!(e instanceof InputEvent) || e.inputType === 'insertReplacementText') pick(input.value); };
+  input.onkeydown = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); input.blur(); }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // Enter takes an exact name, else the only category containing what was typed
+    const q = input.value.trim().toLowerCase();
+    const hits = [...byText.keys()].filter((k) => k.toLowerCase().includes(q));
+    pick([...byText.keys()].find((k) => k.toLowerCase() === q) ?? (q && hits.length === 1 ? hits[0] : ''));
+  };
+  return input;
+}
+
+// Money in came from the other account, money out went to it
+const transferWord = (t) => (t.amount > 0 ? 'Transfer from' : 'Transfer to');
 
 function transferSelect(t) {
   const select = document.createElement('select');
   select.className = 'mini';
-  select.setAttribute('aria-label', 'Transfer to');
-  select.append(new Option('Transfer to…', ''), ...accounts.filter((a) => a.id !== accountId).map((a) => new Option(a.name, a.id)));
-  select.onchange = () => { if (select.value) { t.transferTo = select.value; t.transferAuto = false; } render(); };
-  select.onblur = () => render();
+  select.setAttribute('aria-label', transferWord(t));
+  select.append(new Option(`${transferWord(t)}…`, ''),...accounts.filter((a) => a.id !== accountId).map((a) => new Option(a.name, a.id)));
+  select.onchange = () => {
+    if (select.value) Object.assign(liveRow(t), { transferTo: select.value, transferAuto: false });
+    select.blur();
+  };
   return select;
 }
 
@@ -681,20 +720,24 @@ function rowFor(t) {
       button('Flip sign', () => { t.amount = -t.amount; t.flipped = !t.flipped; t.unsure = false; render(); }, { title: 'Swap between money out and money in' })));
   }
   if (t.transferTo) {
-    li.append(line('match cat', `Transfer to ${nameOf(t.transferTo)}${t.transferAuto ? ' (from your transfer rule)' : ''}`,
+    li.append(line('match cat', `${transferWord(t)} ${nameOf(t.transferTo)}${t.transferAuto ? ' (from your transfer rule)' : ''}`,
       button('Not a transfer', () => { t.transferTo = ''; t.transferAuto = false; render(); })));
   } else {
     const name = t.rule?.category?.name || (t.rule?.category ? 'from your Wallet rule' : 'none');
     const how = t.rule?.manual ? ' (your choice)' : t.rule?.remembered ? ' (remembered)' : t.rule?.guessed ? ' (from similar past records)' : '';
     const labels = (t.rule?.labels || []).map((l) => l.name).filter(Boolean);
-    const change = categories.length ? button('Change', () => { const s = categorySelect(t); change.replaceWith(s); s.focus(); }) : null;
+    const change = categories.length ? button('Change', () => {
+      const s = categorySelect(t);
+      openPicker(change, s);
+      try { s.showPicker(); } catch { /* the list still opens as you type */ }
+    }) : null;
     // no category: Wallet shows it as "Unknown expense", so it is amber to catch the eye before adding
     li.append(line(t.rule?.category ? 'match cat' : 'match cat none', `Category: ${name}${labels.length ? ` · ${labels.join(', ')}` : ''}${how}`, ...(change ? [change] : [])));
   }
   const acts = document.createElement('span');
   acts.className = 'acts';
   if (!t.transferTo && accounts.length > 1) {
-    const make = button('Make transfer', () => { const s = transferSelect(t); make.replaceWith(s); s.focus(); }, { cls: 'text', title: 'Create this as a transfer to another of your Wallet accounts' });
+    const make = button(transferWord(t), () => openPicker(make, transferSelect(t)), { cls: 'text', title: `Create this as a transfer ${t.amount > 0 ? 'from' : 'to'} another of your Wallet accounts` });
     acts.append(make);
   }
   acts.append(button('Ignore', () => setIgnored(t, true), { cls: 'text', title: "Never sync this row (it's remembered on this computer)" }));
@@ -719,6 +762,14 @@ function withEditState(li, t) {
 
 function render() {
   $('results').hidden = false;
+  if (picker && !picker.isConnected) picker = null; // the list was cleared some other way
+  if (!picker) renderList(); // closing the picker renders again
+  renderWhy();
+  updateCount();
+  updateBadge();
+}
+
+function renderList() {
   const entries = txs.map((t) => ({ date: t.date, li: withEditState(rowFor(t), t) }));
   // Wallet-only records go among the bank's rows by date, in whichever order the page lists them (newest or oldest first)
   const ascending = txs.length < 2 || txs[0].date <= txs.at(-1).date;
@@ -727,9 +778,6 @@ function render() {
     entries.splice(i < 0 ? entries.length : i, 0, { date: r.date, li: walletRow(r) });
   }
   $('list').replaceChildren(...entries.map((e) => e.li));
-  renderWhy();
-  updateCount();
-  updateBadge();
 }
 
 // A Wallet record no bank row matched, read-only: usually one the bank hasn't posted yet; otherwise a record entered

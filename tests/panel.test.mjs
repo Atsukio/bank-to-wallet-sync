@@ -266,7 +266,14 @@ const whyLines = (page) => page.evaluate(() => [...document.querySelectorAll("#r
   check('category: nothing known stays uncategorised', lines[3].includes('none'), lines[3]);
   // change the last row's category by hand; it is remembered per merchant
   await page.evaluate(() => document.querySelectorAll('#list li')[3].querySelector('.match.cat button').click());
-  await page.select('#list li:nth-child(4) select', 'c-shop'); await settle(300);
+  check('category: Change opens a box to type in, listing the categories', await page.evaluate(() => {
+    const input = document.querySelector('#list li:nth-child(4) input.mini');
+    return document.activeElement === input && [...input.list.options].map((o) => o.value).join('|') === 'Uncategorised|Food & Drinks|Shopping';
+  }));
+  // the re-read the panel does when it gains focus must not close the picker under the user
+  await page.evaluate(() => window.__fire('activated', {})); await settle();
+  check('category: the picker stays open through a re-read', await page.evaluate(() => document.activeElement?.matches('#list li:nth-child(4) input.mini')));
+  await page.keyboard.type('shop'); await page.keyboard.press('Enter'); await settle(300);
   const after = (await rows(page))[3].lines.join(' ');
   check('category: picking one by hand is shown as your choice', after.includes('Shopping') && after.includes('your choice'), after);
   check('category: the choice is remembered for the merchant', (await store(page)).categoryMemory?.['mystery merchant']?.id === 'c-shop', JSON.stringify((await store(page)).categoryMemory));
@@ -290,6 +297,8 @@ const whyLines = (page) => page.evaluate(() => [...document.querySelectorAll("#r
     const [t, o] = [...document.querySelectorAll('#list .amt')];
     return t.classList.contains('xfer') && o.classList.contains('neg') && getComputedStyle(t).color !== getComputedStyle(o).color;
   }));
+  check('transfer: money out reads "Transfer to"', r[0].lines.join(' ').includes('Transfer to Credit card') && await page.evaluate(() =>
+    [...document.querySelectorAll('#list li')][1].querySelector('.acts button')?.textContent === 'Transfer to'));
   await page.click('#preview');
   const payload = JSON.parse(await text(page, '#payload'));
   check('transfer: payload has the paired-transfer block and a negative amount', payload[0].transfer?.accountId === 'a2' && payload[0].transfer.pairingMode === 'new' && payload[0].amount.value === -3131.27);
@@ -304,6 +313,23 @@ const whyLines = (page) => page.evaluate(() => [...document.querySelectorAll("#r
   check('undo: deletes exactly what was added, a transfer together with its mirror', deleted.length === 1 && JSON.stringify(deleted[0]) === JSON.stringify(['new-1', 'mirror-1', 'new-2']), JSON.stringify(deleted));
   check('undo: button disappears', !(await visible(page, '#undo')));
   check('undo: the rows are new again afterwards', (await rows(page)).every((x) => !x.chips.includes('In Wallet')));
+  await page.close();
+}
+{
+  // money in came from the other account
+  const { page } = await open({
+    rows: [{ date: '2026-10-10', desc: 'TOP UP FROM SAVINGS', amount: 200 }, { date: '2026-10-09', desc: 'SALARY', amount: 5000 }],
+    settings: { token: 't', accountId: 'a1', transferRules: [{ keyword: 'top up', accountId: 'a2' }] },
+  });
+  await settle();
+  const r = await rows(page);
+  check('transfer: money in reads "Transfer from"', r[0].lines.join(' ').includes('Transfer from Credit card') && await page.evaluate(() =>
+    [...document.querySelectorAll('#list li')][1].querySelector('.acts button')?.textContent === 'Transfer from'), JSON.stringify(r[0]));
+  await page.evaluate(() => [...document.querySelectorAll('#list li')][1].querySelector('.acts button').click());
+  await page.evaluate(() => window.__fire('activated', {})); await settle();
+  check('transfer: the account picker stays open through a re-read', await page.evaluate(() => document.activeElement?.matches('#list li:nth-child(2) select.mini')));
+  await page.select('#list li:nth-child(2) select', 'a2'); await settle(300);
+  check('transfer: the account picked after a re-read is applied', (await rows(page))[1].lines.join(' ').includes('Transfer from Credit card'));
   await page.close();
 }
 {
