@@ -3,6 +3,15 @@
 // a release without an entry updates quietly.
 export const CHANGELOG = [
   {
+    version: '0.8.0',
+    items: [
+      'Type to find a category when you change one, instead of scrolling a long list.',
+      'Change and the transfer button open on the first click, instead of sometimes closing straight away.',
+      'The transfer button says "Transfer to" for money out and "Transfer from" for money in.',
+      'Rows already in Wallet are easier to read, and checkboxes and buttons are bigger and easier to hit.',
+    ],
+  },
+  {
     version: '0.7.0',
     items: [
       'Wallet records the bank page doesn\'t show yet are listed as "Not in Bank", and you can delete one that was entered twice or on the wrong account.',

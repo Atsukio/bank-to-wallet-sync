@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Bank to Wallet Sync",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Reads transactions from the bank page you're viewing and adds them to BudgetBakers Wallet. Supports Maybank2u and CIMB Clicks.",
   "permissions": ["storage", "activeTab", "scripting", "sidePanel"],
   "host_permissions": [

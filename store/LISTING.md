@@ -23,7 +23,7 @@ FEATURES
 • Reads the transaction table on the Maybank2u or CIMB Clicks page you are viewing, automatically when you open the panel and again when you change pages or scroll to load more (switch it off in Settings). No bank login is ever handled by the extension.
 • Duplicate detection: compares date, amount, type and description against your existing Wallet records, so re-running it never double-adds. A record dated a day or two before or after the bank (logged early, or created automatically) is recognised (with a one-click "use the bank's date"), and a record with the wrong type (an expense saved as income) is flagged, not hidden, with a one-click fix. Notes you've added details to still count as matches, and a likely match can be merged (keep your note, add the bank's description) or replaced.
 • Picks the right Wallet account for the bank account you're looking at, and remembers it.
-• Fills in categories and labels from your own Wallet rules, the categories you've chosen before, and similar past records. Change any row's category before adding.
+• Fills in categories and labels from your own Wallet rules, the categories you've chosen before, and similar past records. Change any row's category before adding: just type to find it.
 • Turns card repayments and similar rows into proper Wallet transfers, using rules you set.
 • Review before anything is written: untick rows, ignore rows you never want, flip a sign, preview the payload, then Add to Wallet.
 • Undo the last add while you're still on the page.
