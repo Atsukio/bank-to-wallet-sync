@@ -65,9 +65,9 @@
   /* settled rows are muted with M3's variant text colour, not opacity, so they stay readable (4.5:1) */
   li.done :is(.desc, .amt, .date, .cat, .unsure), li.ignored :is(.desc, .amt, .date, .cat, .unsure),
   li.likely :is(.desc, .date) { color: var(--md-on-surface-variant); }
-  .match { grid-column: 2 / -1; font-size: 14px; line-height: 20px; letter-spacing: .25px; margin-top: -4px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .match { grid-column: 2 / -1; font-size: 14px; line-height: 20px; letter-spacing: .25px; margin-top: -4px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px 8px; }
   .match span { overflow-wrap: anywhere; }
-  .match > span:first-child { flex: 1; } /* the text takes the room, so several buttons sit together on the right */
+  .match > span:first-child { flex: 1 1 10em; } /* the text takes the room; the buttons drop to the next line when they don't fit beside it */
   .match button { padding: 2px 12px; font-size: 13px; flex: none; }
   .acts { grid-column: 2 / -1; display: flex; gap: 4px; margin: -2px 0 0 -8px; }
   button.text { border: none; padding: 2px 8px; font-size: 13px; border-radius: 16px; }
@@ -139,7 +139,7 @@
     <p class="muted" id="coverage"></p>
     <div class="bar">
       <label><input type="checkbox" id="toggleAll" checked> <span id="count"></span></label>
-      <span><button id="moveAll" hidden title="Move every Wallet record dated a few days before or after the bank to the bank's date">Use bank dates</button> <button id="fixAll" hidden title="Correct the type of every Wallet record that is recorded with the opposite type">Fix types</button> <button id="mergeAll" hidden title="On every likely match: keep the Wallet note and add the bank's description to it">Merge notes</button> <button id="replaceAll" hidden title="On every likely match: replace the Wallet note with the bank's description">Replace notes</button> <button id="clear" hidden title="Forget the pages collected so far">Clear list</button> <button id="compare" title="Show how Wallet's records and the bank's were read">Compare</button> <button id="preview">Preview payload</button></span>
+      <span><button id="moveAll" hidden title="Move every Wallet record dated a few days before or after the bank to the bank's date">Use bank dates</button> <button id="fixAll" hidden title="Correct the type of every Wallet record that is recorded with the opposite type">Fix types</button> <button id="mergeAll" hidden title="On every likely match: keep the Wallet note and add the bank's description to it">Merge notes</button> <button id="replaceAll" hidden title="On every likely match: replace the Wallet note with the bank's description">Replace notes</button> <button id="payeeAll" hidden title="On every likely match with a name from the bank: set the Wallet payer/payee to it, keeping the note">Set payees</button> <button id="bothAll" hidden title="On every likely match with a name from the bank: replace the Wallet note with the bank's description and set the payer/payee">Replace all</button> <button id="clear" hidden title="Forget the pages collected so far">Clear list</button> <button id="compare" title="Show how Wallet's records and the bank's were read">Compare</button> <button id="preview">Preview payload</button></span>
     </div>
     <ul id="list"></ul>
     <div class="actions"><button class="primary grow" id="sync">Add to Wallet</button></div>

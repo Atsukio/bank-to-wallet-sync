@@ -176,7 +176,7 @@ export function scanPage() {
   // hidden, and works even when the whole table is hidden by a narrow (mobile) layout, where innerText would run the
   // lines together and include the hidden copy. Lines that are only numbers (account and reference numbers) are dropped.
   function describe(el, fallback) {
-    if (!el) return clean(fallback);
+    if (!el) return { text: clean(fallback) };
     const hidden = (node) => {
       for (let a = node.parentElement; a && a !== el.parentElement; a = a.parentElement) if (getComputedStyle(a).display === 'none') return true;
       return false;
@@ -198,8 +198,13 @@ export function scanPage() {
       if (block === lastBlock && lines.length) lines[lines.length - 1] += ' ' + text;
       else { lines.push(text); lastBlock = block; }
     }
-    const kept = lines.filter((l) => !/^[\d\s-]{6,}$/.test(l));
-    return (kept.length ? kept : lines).join(' · ') || clean(fallback);
+    const isNumber = (l) => /^[\d\s-]{6,}$/.test(l);
+    // A DuitNow line reads: type, account number, the other party's name, then the purpose. The name goes to Wallet's
+    // payer/payee field, not the description.
+    const ref = lines.findIndex(isNumber);
+    const payee = /^DUITNOW\b/i.test(lines[0]) && ref > 0 && lines[ref + 1] && !isNumber(lines[ref + 1]) ? lines[ref + 1] : '';
+    const kept = lines.filter((l) => !isNumber(l) && l !== payee);
+    return { text: (kept.length ? kept : lines).join(' · ') || clean(fallback), payee };
   }
 
   // A row of cell texts that also remembers the cell elements (cells.els), for reading signs the text doesn't carry.
@@ -297,11 +302,11 @@ export function scanPage() {
       }
       if (amount === null && map.amount !== undefined) amount = signedAmount(cells[map.amount], cells.els?.[map.amount]);
       if (amount === null || amount === 0) continue;
-      const desc = map.desc !== undefined
+      const { text, payee } = map.desc !== undefined
         ? describe(cells.els?.[map.desc], cells[map.desc])
-        : cells.filter((_, i) => !mapped.has(i)).join(' ');
+        : { text: cells.filter((_, i) => !mapped.has(i)).join(' ') };
       const bal = map.balance !== undefined ? parseAmount(cells[map.balance]) : null;
-      found.push({ date, desc: clean(desc) || '(no description)', amount: Math.round(amount * 100) / 100, bal });
+      found.push({ date, desc: clean(text) || '(no description)', ...(payee && { payee: clean(payee) }), amount: Math.round(amount * 100) / 100, bal });
     }
     reconcileSigns(found);
     out.push(...found.map(({ bal, ...tx }) => tx));

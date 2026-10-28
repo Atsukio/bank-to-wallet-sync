@@ -235,7 +235,8 @@ $('adjustYes').onclick = async () => {
     }
   } catch (e) { setStatus(e.message, 'error'); }
   finally { setBusy(false); }
-  if (demo) renderAccount(); else await refreshAccounts(true);
+  if (demo) renderAccount();
+  else { await refreshAccounts(true); reanalyse(); } // the new record then shows in the list too
 };
 
 function showBalance(b, note = '') {
@@ -333,7 +334,7 @@ async function readPageNow({ auto = false, quiet = false, force = false } = {}) 
     raw = [...raw, ...collectedRaw.filter((t) => !seen.has(signature(t)))];
     collectedRaw = raw;
   }
-  const sig = JSON.stringify([accountId, bankKey(bank), raw.map((t) => [t.date, t.desc, t.amount])]);
+  const sig = JSON.stringify([accountId, bankKey(bank), raw.map((t) => [t.date, t.desc, t.amount, t.payee])]);
   if (soft && !force && sig === lastSig && !$('results').hidden) return;
   lastRead = Date.now();
   lastSig = sig;
@@ -710,7 +711,10 @@ function rowFor(t) {
       ? [button('Merge notes', () => replace([t], { merge: true }), { title: becomes(mergedNote(note, t.desc)) })]
       : [];
     li.append(line('match', note ? `Wallet note: "${note}"` : `In Wallet as: ${t.match?.desc || '(no description)'}`, ...merge,
-      button('Replace note', () => replace([t]), { title: becomes(recordText(t).note) })));
+      button('Replace note', () => replace([t]), { title: becomes(recordText(t).note) }),
+      ...(canPayee(t) ? [
+        button(`Set ${payeeWord(t)}`, () => setPayee([t]), { title: `Wallet ${payeeWord(t)} becomes "${t.payee}". Note, category and labels are kept.` }),
+        button('Replace all', () => setPayee([t], { withNote: true }), { title: `Wallet note becomes "${recordText(t).note}" and the ${payeeWord(t)} becomes "${t.payee}". Category and labels are kept.` })] : [])));
   }
   if (t.ignored) li.append(line('match', "Ignored: this row won't be synced.", button('Restore', () => setIgnored(t, false))));
   if (!fresh) return li;
@@ -867,6 +871,8 @@ const EDIT_GATHER_MS = 150; // quick clicks within this share a request
 const KINDS = {
   merge: { label: 'Merging…', done: (n) => `Merged ${n} note${n === 1 ? '' : 's'}` },
   replace: { label: 'Replacing…', done: (n) => `Replaced ${n} note${n === 1 ? '' : 's'}` },
+  payee: { label: 'Setting…', done: (n) => `Set ${n} payee${n === 1 ? '' : 's'}/payer${n === 1 ? '' : 's'}` },
+  both: { label: 'Replacing…', done: (n) => `Replaced ${n} note${n === 1 ? '' : 's'} and payee${n === 1 ? '' : 's'}` },
   fix: { label: 'Fixing…', done: (n) => `Fixed ${n} type${n === 1 ? '' : 's'}` },
   move: { label: 'Moving…', done: (n) => `Moved ${n} record${n === 1 ? '' : 's'} to the bank's date` },
 };
@@ -958,7 +964,25 @@ function replace(batch, { merge = false } = {}) {
     (t) => Object.assign(t, { done: true, likely: false, selected: false }));
 }
 
+// Wallet's payer/payee field (counterParty), for rows where the scanner read the other party's name (CIMB DuitNow).
+// "Set" changes only that field; "Replace all" also replaces the note, so the row then counts as In Wallet.
+const payeeWord = (t) => (t.amount < 0 ? 'payee' : 'payer');
+const canPayee = (t) => canReplace(t) && t.payee && (t.match?.counterParty || '').toLowerCase() !== t.payee.toLowerCase();
+function setPayee(batch, { withNote = false } = {}) {
+  batch = batch.filter(canPayee);
+  if (!batch.length) return;
+  queueEdits(batch, withNote ? 'both' : 'payee',
+    (t) => (withNote ? recordText(t) : { counterParty: t.payee.slice(0, 255) }),
+    (t, patch) => {
+      t.match = { ...t.match, counterParty: patch.counterParty, texts: [...new Set([...(t.match.texts || []), patch.counterParty])] };
+      if (withNote) Object.assign(t, { done: true, likely: false, selected: false });
+      else afterEdit(t);
+    });
+}
+
 $('replaceAll').onclick = () => replace(txs);
+$('payeeAll').onclick = () => setPayee(txs);
+$('bothAll').onclick = () => setPayee(txs, { withNote: true });
 $('mergeAll').onclick = () => replace(txs, { merge: true });
 
 // After a fix or a move the row is "In Wallet" if the descriptions agree, else still "Likely" (Merge/Replace offered).
@@ -1005,6 +1029,11 @@ function updateCount() {
   $('moveAll').hidden = movable < 2; // one is moved from its own row; the bulk button is for several
   $('moveAll').textContent = `Use ${movable} bank dates`;
   $('replaceAll').textContent = `Replace ${likely} note${likely === 1 ? '' : 's'}`;
+  const payable = txs.filter(canPayee).length;
+  $('payeeAll').hidden = !payable;
+  $('payeeAll').textContent = `Set ${payable} payee${payable === 1 ? '' : 's'}`;
+  $('bothAll').hidden = !payable;
+  $('bothAll').textContent = `Replace all ${payable}`;
   const mergeable = txs.filter(canMerge).length;
   $('mergeAll').hidden = !mergeable;
   $('mergeAll').textContent = `Merge ${mergeable} note${mergeable === 1 ? '' : 's'}`;

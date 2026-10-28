@@ -66,15 +66,15 @@ const cimbTable = (wrapperStyle = '') => `<div class="table-responsive hidden-xs
   <div class="visible-xs-block trx-history-mobile"><div class="history-record"><span>Wed, 07 Oct</span><span>MYR 250.00</span></div></div>`;
 const cimbWant = [
   { date: '2026-10-07', desc: 'I-PAYMENT · FPXPAY EXAMPLE FUNDS BERHAD', amount: -250 },
-  { date: '2026-10-07', desc: 'DUITNOW TO ACCOUNT · TEST PAYEE · Fund Transfer', amount: 100 },
+  { date: '2026-10-07', desc: 'DUITNOW TO ACCOUNT · Fund Transfer', payee: 'TEST PAYEE', amount: 100 },
   { date: '2026-10-05', desc: 'TR IBG · PayNet Direct Debit · EXAMPLE ASSET MGMT', amount: -300 },
-  { date: '2026-10-01', desc: 'DUITNOW TO ACCOUNT · TEST PAYEE · Netflix', amount: -16 },
+  { date: '2026-10-01', desc: 'DUITNOW TO ACCOUNT · Netflix', payee: 'TEST PAYEE', amount: -16 },
   { date: '2026-09-30', desc: 'CREDIT INTEREST', amount: 0.06 },
 ];
 const scanFull = async (html) => { await page.setContent(`<body>${html}</body>`); return page.evaluate(`(() => { ${src}; return scanPage(); })()`); };
 for (const [name, style] of [['desktop layout', ''], ['table hidden by the mobile layout (narrow window)', 'display:none']]) {
   const got = await scanFull(cimbTable(style));
-  const simple = got.map(({ date, desc, amount }) => ({ date, desc, amount }));
+  const simple = got.map(({ date, desc, payee, amount }) => ({ date, desc, ...(payee && { payee }), amount }));
   check(`CIMB ${name}: dates, details and signs`, JSON.stringify(simple) === JSON.stringify(cimbWant), JSON.stringify(simple));
   check(`CIMB ${name}: the hidden "show more" copy is never read`, !JSON.stringify(got).includes('SHOULD NOT APPEAR'));
   check(`CIMB ${name}: account and reference numbers are dropped`, !/\d{6,}/.test(got.map((t) => t.desc).join(' ')));

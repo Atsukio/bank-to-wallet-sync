@@ -3,6 +3,14 @@
 // a release without an entry updates quietly.
 export const CHANGELOG = [
   {
+    version: '0.9.0',
+    items: [
+      'CIMB DuitNow payments: the person\'s name now goes in Wallet\'s payer or payee field instead of the note.',
+      'Rows already in Wallet can get their payee or payer filled in (Set payee, Replace all, or in bulk).',
+      'After a balance adjustment, the new record shows in the list straight away.',
+    ],
+  },
+  {
     version: '0.8.0',
     items: [
       'Type to find a category when you change one, instead of scrolling a long list.',

@@ -138,6 +138,8 @@ check('transfer rule: no keyword, no match', matching.matchTransferRule('NETFLIX
   check('payload: negative amount stays negative', plain.amount.value === -10 && plain.amount.currencyCode === 'MYR');
   const transfer = wallet.toWalletRecord(tx('2026-10-10', 'REPAYMENT', -3131.27, { transferTo: 'a2', rule: { category: { id: 'food' } } }), 'a1', 'MYR');
   check('payload: transfer asks Wallet for a paired record', transfer.transfer?.pairingMode === 'new' && transfer.transfer.accountId === 'a2');
+  const withPayee = wallet.toWalletRecord(tx('2026-10-01', 'DUITNOW TO ACCOUNT · Netflix', -16, { payee: 'TEST PAYEE' }), 'a1', 'MYR');
+  check('payload: the payee goes in counterParty, not the note', withPayee.counterParty === 'TEST PAYEE' && withPayee.note === 'DUITNOW TO ACCOUNT · Netflix' && !('counterParty' in plain));
   check('payload: transfers carry no category', !('categoryId' in transfer) && !('labelIds' in transfer));
   check('payload: currency omitted when unknown', !('currencyCode' in wallet.toWalletRecord(tx('2026-10-01', 'X', -1), 'a1', undefined).amount));
 }

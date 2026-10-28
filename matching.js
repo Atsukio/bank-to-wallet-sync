@@ -2,7 +2,8 @@
 import { sameDescription } from './wallet.js';
 
 // Identifies a bank row across re-reads (and in the "ignored" list): date, description and the amount as read.
-export const signature = (t) => `${t.date}|${t.desc}|${t.amount}`;
+// The payee (read separately from the description) is part of it, so two payments of the same amount to different people differ.
+export const signature = (t) => `${t.date}|${t.desc}|${t.amount}${t.payee ? `|${t.payee}` : ''}`;
 
 const typeOf = (t) => (t.amount < 0 ? 'expense' : 'income');
 

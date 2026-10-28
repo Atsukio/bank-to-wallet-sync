@@ -497,7 +497,9 @@ const whyLines = (page) => page.evaluate(() => [...document.querySelectorAll("#r
   check("adjust: asks first, with the amount and a warning about rows not yet added", ask.startsWith("Add a -RM 234.50 balance adjustment to Savings") && ask.includes("1 new transaction on this page isn't in Wallet yet"), ask);
   check("adjust: nothing is written before confirming", (await log(page, "created")).length === 0);
   await page.evaluate(() => { window.__t.env.accounts = window.__t.env.accounts.map((a) => (a.id === "a1" ? { ...a, balance: { ...a.balance, currentBalance: 1000 } } : a)); });
+  const readsBefore = (await log(page, "fetches")).filter((u) => String(u).startsWith("GET /records")).length;
   await page.click("#adjustYes"); await settle();
+  check("adjust: the list is read again so the new record shows", (await log(page, "fetches")).filter((u) => String(u).startsWith("GET /records")).length > readsBefore);
   const [made] = await log(page, "created");
   check("adjust: one record for the difference, reconciled, with a clear note", made?.amount.value === -234.5 && made.recordState === "reconciled" && made.note.startsWith("Balance adjustment to match the bank's current balance") && made.accountId === "a1", JSON.stringify(made));
   check("adjust: it can be undone like any add", await visible(page, "#undo") && (await text(page, "#undo")) === "Undo last add (1)", await text(page, "#undo"));
@@ -629,6 +631,39 @@ const whyLines = (page) => page.evaluate(() => [...document.querySelectorAll("#r
   });
   await settle();
   check('merge: merged notes count as In Wallet on the next read', (await rows(page)).every((r) => r.chips[0] === 'In Wallet'), JSON.stringify((await rows(page)).map((r) => r.chips)));
+  await page.close();
+}
+
+// ---------------------------------------------------------------- payer / payee
+{
+  const rec = (id, date, amount, note, extra = {}) => ({ id, accountId: 'a1', recordDate: `${date}T04:00:00Z`, amount: { value: amount }, recordType: amount < 0 ? 'expense' : 'income', note, ...extra });
+  const { page } = await open({
+    rows: [
+      { date: '2026-10-02', desc: 'DUITNOW TO ACCOUNT · Netflix', payee: 'TEST PAYEE', amount: -16 },
+      { date: '2026-10-03', desc: 'DUITNOW FROM ACCOUNT · Refund', payee: 'TEST PAYER', amount: 20 },
+      { date: '2026-10-04', desc: 'DUITNOW TO ACCOUNT · Rent', payee: 'TEST PAYEE', amount: -90 },
+      { date: '2026-10-05', desc: 'TNG', amount: -50 },
+      { date: '2026-10-06', desc: 'DUITNOW TO ACCOUNT · Gym', payee: 'TEST PAYEE', amount: -30 },
+    ],
+    records: [rec('p5', '2026-10-06', -30, 'Fitness'), rec('p1', '2026-10-02', -16, 'Streaming'), rec('p2', '2026-10-03', 20, 'Refund'),
+      rec('p3', '2026-10-04', -90, 'Rent', { counterParty: 'test payee' }), rec('p4', '2026-10-05', -50, 'Parking')],
+  });
+  await settle();
+  const buttonsOf = (i) => page.evaluate((n) => [...document.querySelectorAll('#list li')[n].querySelectorAll('button')].map((b) => b.textContent), i);
+  check('payee: a likely row with a bank name offers Set payee and Replace all', JSON.stringify(await buttonsOf(0)) === JSON.stringify(['Merge notes', 'Replace note', 'Set payee', 'Replace all']), JSON.stringify(await buttonsOf(0)));
+  check('payee: money in says payer', (await buttonsOf(1)).includes('Set payer'));
+  check('payee: four buttons wrap under the note instead of squeezing it', await page.evaluate(() => document.querySelector('#list li .match > span:first-child').getBoundingClientRect().width) > 100);
+  check('payee: not offered when Wallet already has the name, or the row has none', !(await buttonsOf(2)).includes('Set payee') && !(await buttonsOf(3)).includes('Set payee'));
+  check('payee: the bulk button counts the rows', (await text(page, '#payeeAll')) === 'Set 3 payees');
+  check('payee: the bulk Replace all counts the rows', (await text(page, '#bothAll')) === 'Replace all 3');
+  await page.evaluate(() => [...document.querySelectorAll('#list li')[0].querySelectorAll('button')].find((b) => b.textContent === 'Set payee').click()); await settle(400);
+  check('payee: Set payee patches only the payee', JSON.stringify((await log(page, 'patched'))[0]) === JSON.stringify([{ id: 'p1', counterParty: 'TEST PAYEE' }]), JSON.stringify(await log(page, 'patched')));
+  check('payee: the row stays likely, so the note can still be merged', (await buttonsOf(0)).includes('Merge notes') && !(await buttonsOf(0)).includes('Set payee'));
+  await page.evaluate(() => [...document.querySelectorAll('#list li')[1].querySelectorAll('button')].find((b) => b.textContent === 'Replace all').click()); await settle(400);
+  check('payee: Replace all sets the note and the payer together', JSON.stringify((await log(page, 'patched'))[1]) === JSON.stringify([{ id: 'p2', note: 'DUITNOW FROM ACCOUNT · Refund', counterParty: 'TEST PAYER' }]), JSON.stringify(await log(page, 'patched')));
+  check('payee: the row is then In Wallet', (await rows(page))[1].chips[0] === 'In Wallet');
+  await page.click('#bothAll'); await settle(400);
+  check('payee: the bulk Replace all does the rest in one request', JSON.stringify((await log(page, 'patched'))[2]) === JSON.stringify([{ id: 'p5', note: 'DUITNOW TO ACCOUNT · Gym', counterParty: 'TEST PAYEE' }]), JSON.stringify(await log(page, 'patched')));
   await page.close();
 }
 

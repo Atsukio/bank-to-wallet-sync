@@ -209,6 +209,7 @@ export async function existingRecords(token, accountId, from, to) {
         type: String(r.recordType || '').toLowerCase() || undefined,
         transfer: Boolean(r.transfer),
         note: typeof r.note === 'string' ? r.note.replace(LEGACY_TAG_RE, '').trim() : '',
+        counterParty: typeof r.counterParty === 'string' ? r.counterParty.trim() : '',
         texts,
         desc: texts.join(' · '),
       });
@@ -219,9 +220,10 @@ export async function existingRecords(token, accountId, from, to) {
   return out;
 }
 
-// The bank's description goes in the note (255 characters max). The payer/payee field (counterParty) is left unset.
+// The bank's description goes in the note (255 characters max). The other party's name, when the scanner found one
+// (CIMB DuitNow), goes in the payer/payee field (counterParty: payee for expenses, payer for income).
 export function recordText(tx) {
-  return { note: tx.desc.slice(0, 255) };
+  return { note: tx.desc.slice(0, 255), ...(tx.payee && { counterParty: tx.payee.slice(0, 255) }) };
 }
 
 // Body of POST /records (see https://rest.budgetbakers.com/wallet/openapi). The amount's sign decides
